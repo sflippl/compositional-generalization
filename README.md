@@ -1,7 +1,5 @@
 ## Code for "When does compositional structure yield compositional generalization? A kernel theory."
 
-NOTE: Due to upload limitations on OpenReview, this repository does not contain the collated files used to generate the images. To access the repository including those files, please use the anonymous Google Drive link provided here: https://drive.google.com/drive/folders/1sXCxfKETordLgCxzKdwO3qhzKxtX31Bc?usp=sharing
-
 ### Experiments
 
 We specify the conda environment in 'environment.yml'.
