@@ -222,6 +222,6 @@ fig_d
 fig <- 
   fig_a + fig_b + fig_c + fig_d + plot_layout(nrow=1) + plot_annotation(tag_levels = 'a')
 fig & theme(legend.position='top')
-ggsave('../figures/neurips/neurips-4.pdf', width = width*2/3, height = 0.3*width, units = 'cm')
+ggsave('../figures/fig-4.pdf', width = width*2/3, height = 0.3*width, units = 'cm')
 ```
 

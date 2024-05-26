@@ -179,6 +179,6 @@ fig
 
 ```{r}
 fig
-ggsave('../figures/neurips/neurips-2.pdf', width = width/2, height = 0.2*width, units = 'cm')
+ggsave('../figures/fig-2.pdf', width = width/2, height = 0.2*width, units = 'cm')
 ```
 

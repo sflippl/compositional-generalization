@@ -273,6 +273,6 @@ fig_b
 
 ```{r}
 fig_a + fig_b + plot_layout(nrow=1, widths= c(4,1)) + plot_annotation(tag_levels='a')
-ggsave('../figures/neurips/neurips-sim.pdf', width = width, height = 0.6*width, units = 'cm')
+ggsave('../figures/fig-sim.pdf', width = width, height = 0.6*width, units = 'cm')
 ```
 

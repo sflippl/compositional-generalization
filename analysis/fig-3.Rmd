@@ -341,6 +341,6 @@ fig_e
 fig <-
   fig_a + fig_b + fig_c + fig_d + fig_e + plot_layout(nrow = 1) + plot_annotation(tag_level = 'a')
 fig & theme(legend.position='top')
-ggsave('../figures/neurips/neurips-3.pdf', width = width, height = 0.3*width, units = 'cm')
+ggsave('../figures/fig/fig-3.pdf', width = width, height = 0.3*width, units = 'cm')
 ```
 

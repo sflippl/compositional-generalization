@@ -83,6 +83,6 @@ performance
 
 ```{r}
 schema + performance + plot_layout(nrow=1, widths=c(2,1)) + plot_annotation(tag_levels='a')
-ggsave('../figures/neurips/neurips-partial.pdf', width = width*3/4, height = 0.3*width, units = 'cm')
+ggsave('../figures/fig-partial.pdf', width = width*3/4, height = 0.3*width, units = 'cm')
 ```
 

@@ -47,6 +47,6 @@ read_csv('../collated/C17_equivalence_deep/metrics.csv', guess_max=1e5) %>%
   scale_x_log10(breaks = c(10, 1000)) +
   scale_y_continuous(n.breaks = 3) +
   labs(x = 'Epochs', y = 'Accuracy', linetype='Split')
-ggsave('../figures/neurips/neurips-te-deep.pdf', width = width*2/3, height = 0.25*width, units = 'cm')
+ggsave('../figures/fig-te-deep.pdf', width = width*2/3, height = 0.25*width, units = 'cm')
 ```
 

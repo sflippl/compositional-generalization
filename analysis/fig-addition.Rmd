@@ -153,7 +153,7 @@ fig_d
 fig <- fig_d + fig_k_c + fig_k_a + fig_b + plot_layout(nrow=2, widths=c(4, 1))
 fig <- fig + plot_annotation(tag_levels = 'a')
 fig
-ggsave('../figures/neurips/neurips-addition-dispersed.pdf', width = width, height = 0.45*width, units = 'cm')
+ggsave('../figures/fig-addition-dispersed.pdf', width = width, height = 0.45*width, units = 'cm')
 ```
 
 
@@ -503,7 +503,7 @@ fig_s_values_deep
 fig <- fig_s_rich_add + fig_s_rich_sim + fig_s_values_rich + fig_d + fig_s_deep_add + fig_s_values_deep + plot_layout(design='122\n334\n566', heights=c(1,1,1))
 fig <- fig + plot_annotation(tag_levels = 'a')
 fig
-ggsave('../figures/neurips/neurips-addition-rich.pdf', width = width, height = 0.65*width, units = 'cm')
+ggsave('../figures/fig-addition-rich.pdf', width = width, height = 0.65*width, units = 'cm')
 ```
 
 ## Deep neural networks
@@ -673,7 +673,7 @@ fig_s_mnist_add
 fig <-
   fig_s_mnist_gen + (fig_s_mnist_add + guides(color=guide_none())) + fig_s_mnist_val + plot_layout(design='12\n33') + plot_annotation(tag_levels = 'a')
 fig
-ggsave('../figures/neurips/neurips-addition-mnist.pdf', width = width*2/3, height = 0.45*width, units = 'cm')
+ggsave('../figures/fig-addition-mnist.pdf', width = width*2/3, height = 0.45*width, units = 'cm')
 ```
 
 ```{r}
@@ -839,6 +839,6 @@ fig_r2_c
 ```{r}
 fig <- fig_r1_a + fig_r1_b + fig_r2_c + plot_layout(nrow=1, widths = c(2,0.5,1)) + plot_annotation(tag_levels = 'a')
 fig & theme(legend.position='top', legend.direction='vertical')
-ggsave('../figures/neurips/neurips-addition-cifar.pdf', width = width, height = 0.65*width, units = 'cm')
+ggsave('../figures/fig-addition-cifar.pdf', width = width, height = 0.65*width, units = 'cm')
 ```
 

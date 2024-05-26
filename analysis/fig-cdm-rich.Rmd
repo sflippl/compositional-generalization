@@ -72,6 +72,6 @@ fig_a <-
 
 ```{r}
 fig_a
-ggsave('../figures/neurips/neurips-cdm-rich.pdf', width = width/2, height = 0.3*width, units = 'cm')
+ggsave('../figures/fig-cdm-rich.pdf', width = width/2, height = 0.3*width, units = 'cm')
 ```
 

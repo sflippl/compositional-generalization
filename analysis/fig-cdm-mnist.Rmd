@@ -159,7 +159,7 @@ fig_c
 
 ```{r}
 fig_a + fig_b + fig_c + plot_layout(design='12\n33', widths=c(3,1)) + plot_annotation(tag_levels='a')
-ggsave('../figures/neurips/neurips-cdm-mnist.pdf', width = width, height = 0.6*width, units = 'cm')
+ggsave('../figures/fig-cdm-mnist.pdf', width = width, height = 0.6*width, units = 'cm')
 ```
 
 ```{r}
@@ -302,6 +302,6 @@ fig_r3_c
 
 ```{r}
 fig_r3_a + fig_r3_b + fig_r3_c + plot_layout(nrow=1, widths = c(2,0.5,1)) + plot_annotation(tag_levels = 'a')
-ggsave('../figures/neurips/neurips-cdm-cifar.pdf', width = width, height = 0.6*width, units = 'cm')
+ggsave('../figures/fig-cdm-cifar.pdf', width = width, height = 0.6*width, units = 'cm')
 ```
 

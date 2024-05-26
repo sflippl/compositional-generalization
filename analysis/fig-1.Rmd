@@ -117,6 +117,6 @@ fig <-
   plot_layout(nrow=1, widths=c(3,3,2,1)) +
   plot_annotation(tag_levels='a')
 fig & theme(legend.position='top')
-ggsave('../figures/neurips/neurips-1.pdf', width = width, height = 0.35*width, units = 'cm')
+ggsave('../figures/fig-1.pdf', width = width, height = 0.35*width, units = 'cm')
 ```
 
