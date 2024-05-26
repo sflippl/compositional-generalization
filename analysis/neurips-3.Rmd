@@ -1,0 +1,346 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+library(magrittr)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+linewidth <- 0.25
+```
+
+```{r}
+fig_a <-
+  expand.grid(
+    sal=seq(0,0.5,0.01),
+    p=1:5
+  ) %>%
+  as_tibble() %>%
+  mutate(
+    m = p*sal/(1+(p-2)*sal)
+  ) %>%
+  ggplot(aes(sal, m, color=p, group=p)) +
+  geom_line(size=linewidth) +
+  my_theme +
+  labs(x = 'Sal(1,2)') +
+  scale_color_continuous(breaks=c(1,5)) +
+  theme(legend.position=c(0.8,0.2)) +
+  scale_x_continuous(breaks = c(0, 0.5)) +
+  scale_y_continuous(breaks = c(0, 1))
+fig_a
+```
+
+```{r}
+fig_b <-
+  expand.grid(
+    sim = c(0.3, 0.35, 0.4, 0.45, 0.5),
+    item = -4:4
+  ) %>%
+  as_tibble() %>%
+  mutate(
+    value = sim/(1-sim)*item
+  ) %>%
+  ggplot(aes(item, value, color=sim, group=paste(sim))) +
+  geom_abline(slope=1, color='black', linetype='11', size=0.25) +
+  geom_line(size = linewidth) +
+  #geom_point() +
+  scale_x_continuous(breaks = c(-4, 0, 4), labels = c('[-4]', '[0]', '[4]')) +
+  scale_color_viridis_c(breaks = c(0.3, 0.5)) +
+  my_theme +
+  coord_fixed() +
+  labs(x = 'Item', y = 'Value', color = 'Sal(1,2)') +
+  scale_y_continuous(breaks = c(-4, 0, 4), limits = c(-4, 4)) +
+  theme(legend.position=c(0.2, 0.8))
+fig_b
+```
+
+
+```{r}
+# Note: this is an obsolete panel that we leave in in the script to keep the figure scaling consistent.
+fig_c <-
+  ggplot() +
+  geom_abline(slope=1, color='black', linetype='11', size=0.25) +
+  my_theme +
+  coord_fixed() +
+  labs(x = 'Item', y = 'Value', linetype = 'Comp.', color = 'Task') +
+  scale_y_continuous(breaks = c(-4, 0, 4), limits = c(-4, 4)) +
+  scale_x_continuous(breaks = c(-4, 0, 4), limits = c(-4, 4)) +
+  theme(legend.position=c(0.2, 0.8))
+fig_c
+```
+
+```{r}
+# We plot trajectories of the different deep nets.
+k_relu <- function(x, leak) {
+  (leak-1)**2*(sqrt(1-x**2)+(pi-acos(x))*x)/(2*pi) + leak*x
+}
+k_remos <- function(x, n) {
+  x <- acos(x)
+  if(n == 0) {
+    return(pi-x)
+  }
+  if(n == 1) {
+    return(sin(x)+(pi-x)*cos(x))
+  }
+  if(n == 2) {
+    return(3*sin(x)*cos(x)+(pi-x)*(1+2*(cos(x))**2))
+  }
+}
+k_gaussian <- function(x, A) {
+  1/sqrt((2*A+1)**2-(2*A*x)**2)
+}
+k <- function(x, rho) {
+  x+rho*(sqrt(1-x**2)-acos(x)*x)/pi
+}
+get_kappas <- function(k, l, C) {
+  kappas <- c()
+  for(c in 0:C) {
+    kappas <- c(kappas, (c/C))
+  }
+  salience <- c(kappas[1])
+  for(c in 1:C) {
+    salience <- c(salience, kappas[c+1]-sum(choose(c, 0:(c-1))*salience))
+  }
+  df <- tibble()
+  for(c in 0:C){
+    df <- bind_rows(
+      df,
+      tibble(
+        c=c,
+        kappa=kappas[c+1],
+        l=0,
+        salience = salience[c+1]
+      )
+    )
+  }
+  for(l in 1:l){
+    kappa_id <- kappas[C+1]
+    for(c in 0:C) {
+      kappas[c+1] <- k(kappas[c+1]/kappa_id)
+    }
+    salience <- c(kappas[1])
+    for(c in 1:C) {
+      salience <- c(salience, kappas[c+1]-sum(choose(c, 0:(c-1))*salience))
+    }
+    for(c in 0:C){
+      df <- bind_rows(
+        df,
+        tibble(
+          c=c,
+          kappa=kappas[c+1],
+          salience = salience[c+1],
+          l=l
+        )
+      )
+    }
+  }
+  df
+}
+preprocess_df <- function(df) {
+  df %>%
+    inner_join(
+      df %>%
+        filter(c == 0) %>%
+        rename(distinct = kappa) %>%
+        select(-c, -salience)
+    ) %>%
+    inner_join(
+      df %>%
+        filter(c == max(df$c)) %>%
+        rename(identical = kappa) %>%
+        select(-c, -salience)
+    ) %>%
+    mutate(
+      salience = salience/(identical-distinct)
+    ) %>%
+    filter(c!=0)
+}
+L <- 20
+n <- 3
+df <-
+  bind_rows(
+    get_kappas(function(x) k_relu(x, leak=0), L, n) %>%
+      mutate(nonlinearity = 'Rectified linear'),
+    get_kappas(function(x) k_relu(x, leak=0.1), L, n) %>%
+      mutate(nonlinearity = 'Leaky relu'),
+    get_kappas(function(x) k_remos(x, n=0), L, n) %>%
+      mutate(nonlinearity = 'Step function'),
+    get_kappas(function(x) k_remos(x, n=2), L, n) %>%
+      mutate(nonlinearity = 'Rectified quadratic'),
+    get_kappas(function(x) k_gaussian(x, 1), L, n) %>%
+      mutate(nonlinearity = 'Gaussian')
+  ) %>% preprocess_df() %>%
+  mutate(
+    variable = paste0('sal_', c)
+  ) %>%
+  select(variable, salience, nonlinearity, l) %>%
+  pivot_wider(names_from = 'variable', values_from = 'salience')
+```
+
+
+```{r}
+metrics_12 <-
+  read_csv('../collated/12_cdm_kernel/metrics.csv', guess_max=1e5) %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ '3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ '2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ '1'
+    ),
+    sim_1 = `sim_(0, 0, 1)`,
+    sim_2 = `sim_(0, 1, 1)`
+  ) %>%
+  select(-starts_with('sim_('), -task.leftout_conjunctions)
+metrics_12_b <-
+  metrics_12 %>%
+  mutate(sal_1 = sim_1, sal_2 = sim_2-2*sim_1) %>%
+  filter(metric == 'binary_accuracy', model.objective=='classification', sal_1>=0, sal_2>=0) %>%
+  group_by(sal_1, sal_2, split) %>%
+  nest() %>%
+  mutate(
+    generalization = map_chr(data, function(dat) {
+      case_when(
+        dat %>% filter(leftout_conjunctions == '3') %>% extract2('value') %>% equals(1) ~ 'all',
+        dat %>% filter(leftout_conjunctions == '2') %>% extract2('value') %>% equals(1) ~ '2 and 1',
+        dat %>% filter(leftout_conjunctions == '1') %>% extract2('value') %>% equals(1) ~ '1',
+        all(.$value!=1) ~ 'none'
+    )})
+  )
+fig_d <-
+  metrics_12_b %>%
+  filter(split == 'task=test') %>%
+  ggplot(aes(x=sal_1, y=sal_2, fill=generalization)) +
+  geom_tile(width=0.0136, height=2*0.0068) +
+  my_theme +
+  labs(x = 'Sal(1,3)', y = 'Sal(2,3)', fill = 'Generalization for ...') +
+  scale_fill_manual(values = c(`all` = '#11C638', `2 and 1` = '#83D38A', `1` = '#C4DEC6', none = '#EF9708'),
+                    labels = c('all', 'CDM-2 and\nCDM-1', 'CDM-1', 'none')) +
+  scale_x_continuous(breaks = c(0, 1/3), labels = c('0', '1/3')) +
+  scale_y_continuous(breaks = c(0, 1/3), labels = c('0', '1/3')) +
+  annotate(geom = 'point', x=0.20350064, y=0.09423825, size=0.05) + 
+  annotate(geom = 'point', x=0.10100758, y=0.13911539, size=0.05) +
+  geom_line(
+    data = df %>% filter(l>0, l<=10) %>% mutate(nonlinearity = factor(
+      nonlinearity,
+      c('Step function', 'Rectified linear', 'Leaky relu', 'Rectified quadratic', 'Gaussian')
+    )),
+    mapping = aes(fill = NULL, color=nonlinearity, group=nonlinearity),
+    size = linewidth
+  ) +
+  scale_color_manual(values=c('magenta4', 'navy', 'brown', 'red', 'royalblue'),
+                     labels=c('Step fun.', 'ReLU', 'Leaky ReLU', 'Rect. quad.', 'Gaussian')) +
+  theme(legend.position=c(0.8, 0.8))
+fig_d
+```
+
+```{r}
+labels <- read_csv('../collated/12_cdm_kernel/labels.csv', guess_max=1e5) %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ '3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ '2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ '1'
+    ),
+    sim_1 = `sim_(0, 0, 1)`,
+    sim_2 = `sim_(0, 1, 1)`,
+    sal_1 = sim_1,
+    sal_2 = sim_2-2*sal_1
+  ) %>%
+  select(-starts_with('sim_('), -task.leftout_conjunctions) %>%
+  mutate(
+    conjunction_type = case_when(
+      (comp_0 == 'all') & (comp_1 == 'all') & (comp_2 == 'all') ~ 'intercept',
+      (comp_1 == 'all') & (comp_2 == 'all') ~ 'context only',
+      ((comp_0 == '0') & (comp_1 == 'all')) | ((comp_0 == '1') & (comp_2 == 'all')) ~ 'wrong conj',
+      ((comp_0 == '1') & (comp_1 == 'all')) | ((comp_0 == '0') & (comp_2 == 'all')) ~ 'right conj',
+      (comp_0 == 'all') & ((comp_1=='all') | (comp_2=='all')) ~ 'sensory feature',
+      (comp_0 == 'all') ~ 'sensory feature',
+      TRUE ~ 'memorization'
+    )
+  ) %>%
+  mutate(
+    conjunction_type2 = case_when(
+      (comp_0 == 'all') & (comp_1 == 'all') & (comp_2 == 'all') ~ 'intercept',
+      (comp_0 == '0') & (comp_1 == 'all') & (comp_2 == 'all') ~ 'context 1',
+      (comp_0 == '1') & (comp_1 == 'all') & (comp_2 == 'all') ~ 'context 2',
+      ((comp_0 == '0') & (comp_1 == 'all')) & (comp_2 %in% c('0', '1', '2')) ~ 'c1, f2=-1',
+      ((comp_0 == '0') & (comp_1 == 'all')) & (comp_2 %in% c('3', '4', '5')) ~ 'c1, f2=1',
+      ((comp_0 == '1') & (comp_2 == 'all')) & (comp_1 %in% c('0', '1', '2')) ~ 'c2, f1=-1',
+      ((comp_0 == '1') & (comp_2 == 'all')) & (comp_1 %in% c('3', '4', '5')) ~ 'c2, f1=1',
+      ((comp_0 == '0') & (comp_2 == 'all')) & (comp_1 %in% c('0', '1', '2')) ~ 'c1, f1=-1',
+      ((comp_0 == '0') & (comp_2 == 'all')) & (comp_1 %in% c('3', '4', '5')) ~ 'c1, f1=1',
+      ((comp_0 == '1') & (comp_1 == 'all')) & (comp_2 %in% c('0', '1', '2')) ~ 'c2, f2=-1',
+      ((comp_0 == '1') & (comp_1 == 'all')) & (comp_2 %in% c('3', '4', '5')) ~ 'c2, f2=1',
+      (comp_0 == 'all') & (comp_1 %in% c('0', '1', '2')) & (comp_2 %in% c('0', '1', '2')) ~ 'f1=-1, f2=-1',
+      (comp_0 == 'all') & (comp_1 %in% c('3', '4', '5')) & (comp_2 %in% c('0', '1', '2')) ~ 'f1=1, f2=-1',
+      (comp_0 == 'all') & (comp_1 %in% c('0', '1', '2')) & (comp_2 %in% c('3', '4', '5')) ~ 'f1=-1, f2=1',
+      (comp_0 == 'all') & (comp_1 %in% c('3', '4', '5')) & (comp_2 %in% c('3', '4', '5')) ~ 'f1=1, f2=1',
+      ((comp_0 == '0') & (comp_1 %in% c('0', '1', '2'))) | ((comp_0 == '1') & (comp_2 %in% c('0', '1', '2'))) ~ 'mem=-1',
+      ((comp_0 == '0') & (comp_1 %in% c('3', '4', '5'))) | ((comp_0 == '1') & (comp_2 %in% c('3', '4', '5'))) ~ 'mem=1',
+      (comp_1 %in% c('0', '1', '2')) | (comp_2 %in% c('0', '1', '2')) ~ 'f1=-1 or f2=-1',
+      (comp_1 %in% c('3', '4', '5')) | (comp_2 %in% c('3', '4', '5')) ~ 'f1=1 or f2=1'
+    )
+  )
+labels_2 <-
+  labels %>%
+  mutate(
+    rep = case_when(
+      abs(sal_1-0.20350064)<0.01 & abs(sal_2-0.09423825)<0.01 ~ 'Rep. 2',
+      abs(sal_1-0.10100758)<0.01 & abs(sal_2-0.13911539)<0.01 ~ 'Rep. 1'
+    )
+  ) %>%
+  filter(
+    !is.na(rep)
+  )
+fig_e <-
+  labels_2 %>%
+  mutate(
+    conjunction_type = conjunction_type %>%
+      factor(levels = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization')) %>%
+      fct_rev(),
+    rep_types = paste0(rep, '(', leftout_conjunctions, ')') %>%
+      factor(levels = c('Rep. 1(3)', 'Rep. 1(2)', 'Rep. 2(3)')) %>%
+      fct_rev()
+  ) %>%
+  filter(rep!='sim1=0.2, sim2=0.5', conjunction_type != 'intercept') %>%
+  filter(model.objective == 'classification', (rep=='Rep. 1')|(leftout_conjunctions=='3'), leftout_conjunctions%in% c('2', '3')) %>%
+  ggplot(aes(conjunction_type, abs(value), fill=rep_types)) +
+  stat_summary(geom='bar', position='dodge', color='black') +
+  coord_flip() +
+  scale_x_discrete(breaks = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization'),
+                   labels = c('Right conj.', 'Wrong conj.', 'Sensory feat.', 'Context only', 'Memorization')) +
+  #scale_fill_manual(values = c('darkgreen', 'orange')) +
+  colorspace::scale_fill_discrete_qualitative('Harmonic') +
+  labs(x = 'Conj. type', y = 'Value', fill='Representation') +
+  my_theme +
+  scale_y_continuous(breaks = c(0, 0.5))
+fig_e
+```
+
+```{r}
+fig <-
+  fig_a + fig_b + fig_c + fig_d + fig_e + plot_layout(nrow = 1) + plot_annotation(tag_level = 'a')
+fig & theme(legend.position='top')
+ggsave('../figures/neurips/neurips-3.pdf', width = width, height = 0.3*width, units = 'cm')
+```
+

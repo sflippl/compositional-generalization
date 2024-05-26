@@ -1,0 +1,307 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+linewidth <- 0.25
+```
+
+```{r}
+metrics_mnist <- read_csv('../collated/22_cdm_mnist/metrics.csv') %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ 'CD-3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ 'CD-2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ 'CD-1'
+    )
+  ) %>%
+  select(-train_loss, -step, -task.leftout_conjunctions) %>%
+  filter(!is.na(val_loss)) %>%
+  pivot_longer(cols=starts_with('task')) %>%
+  separate(col=name, into=c(NA, 'task_split', NA, NA, 'embedding_split', 'metric'), sep="[(--),=,/]")
+last_epoch_mnist <-
+  metrics_mnist %>%
+  group_by(leftout_conjunctions, task_split, embedding_split, metric, model.trainer_config.criterion, embedding.input_generator.seed, embedding.input_generator.distance) %>%
+  summarise(epoch = max(epoch)) %>%
+  filter(epoch>0)
+se <- function(x) sd(x)/sqrt(length(x))
+fig_a <-
+  metrics_mnist %>%
+  inner_join(last_epoch_mnist) %>%
+  filter(metric == 'binary_accuracy', model.trainer_config.criterion=='crossentropy') %>%
+  mutate(
+    split = case_when(
+      embedding_split=='train' ~ 'Training set',
+      (embedding_split=='val_2')&(task_split=='train') ~ 'In-distribution',
+      (embedding_split=='val_2')&(task_split=='test') ~ 'Compositional'
+    ) %>% factor(levels = c('Training set', 'In-distribution', 'Compositional'))
+  ) %>%
+  filter(!is.na(split)) %>%
+  ggplot(aes(embedding.input_generator.distance, value, color=split, group=split)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line') +
+  my_theme +
+  facet_wrap(~leftout_conjunctions) +
+  scale_y_continuous(limits = c(0,1), breaks = c(0, 0.5, 1)) +
+  scale_x_continuous(breaks = c(0, 20)) +
+  scale_color_manual(
+    values = c('black', 'blue', 'orange')
+  ) +
+  labs(x = 'Dist.', y = 'Acc.', color = 'Generalization')
+fig_a
+```
+
+```{r}
+fig_b <-
+  read_csv('../collated/22_cdm_mnist/additivity.csv') %>%
+  filter(epoch!=0) %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ 'CD-3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ 'CD-2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ 'CD-1'
+    )
+  ) %>%
+  ggplot(aes(embedding.input_generator.distance, additivity, color=leftout_conjunctions, group=leftout_conjunctions)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line') +
+  my_theme +
+  scale_y_continuous(n.breaks = 3) +
+  scale_x_continuous(breaks = c(0, 20)) +
+  scale_color_manual(values = c(`CD-3` = '#11C638', `CD-2` = '#83D38A', `CD-1` = '#C4DEC6')) +
+  labs(x = 'Dist.', y = 'Additivity', color = 'Task variant')
+fig_b
+```
+
+
+```{r}
+values <- read_csv('../collated/22_cdm_mnist/labels.csv') %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ '3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ '2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ '1'
+    )
+  ) %>%
+  mutate(
+    conjunction_type = case_when(
+      (comp_0 == 'all') & (comp_1 == 'all') & (comp_2 == 'all') ~ 'intercept',
+      (comp_1 == 'all') & (comp_2 == 'all') ~ 'context only',
+      ((comp_0 == '0') & (comp_1 == 'all')) | ((comp_0 == '1') & (comp_2 == 'all')) ~ 'wrong conj',
+      ((comp_0 == '1') & (comp_1 == 'all')) | ((comp_0 == '0') & (comp_2 == 'all')) ~ 'right conj',
+      (comp_0 == 'all') & ((comp_1=='all') | (comp_2=='all')) ~ 'sensory feature',
+      (comp_0 == 'all') ~ 'sensory feature',
+      TRUE ~ 'memorization'
+    )
+  )
+values <-
+  values %>%
+  filter(model.trainer_config.criterion == 'crossentropy') %>%
+  group_by(comp_0, comp_1, comp_2, leftout_conjunctions, conjunction_type, embedding.input_generator.distance) %>%
+  summarise(value = mean(value)) %>%
+  mutate(
+    conjunction_type = conjunction_type %>%
+      factor(levels = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization')) %>%
+      fct_rev()
+  ) %>%
+  filter(conjunction_type != 'intercept') %>%
+  group_by(conjunction_type, leftout_conjunctions, embedding.input_generator.distance) %>%
+  summarise(value = mean(abs(value)))
+values <-
+  values %>%
+  inner_join(
+    values %>%
+      group_by(leftout_conjunctions, embedding.input_generator.distance) %>%
+      summarise(total = max(value))
+  ) %>%
+  mutate(value = value/total)
+fig_c <-
+  values %>%
+  mutate(leftout_conjunctions = paste0('CD-', leftout_conjunctions)) %>%
+  mutate(leftout_conjunctions = factor(leftout_conjunctions, levels = c('CD-3', 'CD-2', 'CD-1'))) %>%
+  ggplot(aes(conjunction_type, abs(value), fill=embedding.input_generator.distance, group=embedding.input_generator.distance)) +
+  stat_summary(geom='bar', position='dodge', color=NA) +
+  coord_flip() +
+  scale_x_discrete(breaks = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization'),
+                   labels = c('Right conj.', 'Wrong conj.', 'Sensory feat.', 'Context only', 'Memorization')) +
+  labs(x = 'Conj. type', y = 'Rel. magnitude', fill='Distance') +
+  scale_y_continuous(breaks = c(0, 1)) +
+  scale_fill_viridis_c(breaks = c(0, 20)) +
+  facet_wrap(~leftout_conjunctions) +
+  my_theme
+fig_c
+```
+
+
+```{r}
+fig_a + fig_b + fig_c + plot_layout(design='12\n33', widths=c(3,1)) + plot_annotation(tag_levels='a')
+ggsave('../figures/neurips/neurips-cdm-mnist.pdf', width = width, height = 0.6*width, units = 'cm')
+```
+
+```{r}
+fig_r3_a <-
+  bind_rows(
+    read_csv('../collated/C15_cdm_cifar_resnet_improved/metrics.csv') %>%
+      mutate(network = 'ResNet'),
+    read_csv('../collated/C19_cdm_cifar_vit/metrics.csv') %>%
+      mutate(network = 'ViT')
+  ) %>%
+  pivot_longer(cols=starts_with('task=')) %>%
+  select(epoch, name, value, embedding.input_generator.seed, task.leftout_conjunctions, network) %>%
+  mutate(
+    task = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ 'CD-3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ 'CD-2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ 'CD-1'
+    ) %>% factor(levels = c('CD-3', 'CD-2', 'CD-1'))
+  ) %>%
+  drop_na() %>%
+  separate(name, c(NA, 'task_split', NA, NA, 'input_split', NA), '[-,/,=]') %>%
+  mutate(
+    split = case_when(
+      input_split=='train' ~ 'Training set',
+      (input_split=='val_2')&(task_split=='train') ~ 'In-distribution',
+      (input_split=='val_2')&(task_split=='test') ~ 'Compositional'
+    ) %>% factor(levels = c('Training set', 'In-distribution', 'Compositional'))
+  ) %>%
+  filter(!is.na(split)) %>%
+  ggplot(aes(epoch, value, color=split, group=split)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line') +
+  facet_wrap(network~task, scales='free_x', nrow=2) +
+  scale_color_manual(
+    values = c('black', 'blue', 'orange')
+  ) +
+  scale_linetype_manual(
+    values = c('solid', '11'),
+    breaks = c('train', 'test'),
+    labels = c('Familiar combinations', 'Novel combinations')
+  ) +
+  labs(color = 'Generalization', x = 'Epoch', y = 'Accuracy') +
+  my_theme +
+  scale_y_continuous(breaks = c(0.5, 0.9)) +
+  scale_x_continuous(breaks = c(10,100)) +
+  theme(legend.position = 'top')
+fig_r3_a
+```
+
+```{r}
+fig_r3_b <-
+  bind_rows(
+    read_csv('../collated/C15_cdm_cifar_resnet_improved/additivity.csv') %>%
+    filter(epoch==99) %>%
+      mutate(network = 'ResNet'),
+    read_csv('../collated/C19_cdm_cifar_vit/additivity.csv') %>%
+      mutate(network = 'ViT') %>%
+    filter(epoch == 200)
+  ) %>%
+  select(epoch, split, additivity, embedding.input_generator.seed, task.leftout_conjunctions, network) %>%
+  mutate(
+    task = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ 'CD-3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ 'CD-2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ 'CD-1'
+    ) %>% factor(levels = c('CD-3', 'CD-2', 'CD-1'))
+  ) %>%
+  drop_na() %>%
+  separate(split, c(NA, 'task_split', NA, NA, 'input_split', NA), '[-,/,=]') %>%
+  ggplot(aes(task, additivity)) +
+  stat_summary(size=0.25, fun = mean, fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  facet_wrap(~network, nrow=2) +
+  labs(x = 'Task', y = 'Additivity') +
+  my_theme +
+  scale_y_continuous(n.breaks=3) +
+  theme(axis.text.x = element_text(angle=-30, hjust=0.))
+fig_r3_b
+```
+
+```{r}
+df <- bind_rows(
+  read_csv('../collated/C15_cdm_cifar_resnet_improved/labels.csv', guess_max = 1e5) %>%
+    filter(epoch==99) %>%
+    mutate(network = 'ResNet'),
+  read_csv('../collated/C19_cdm_cifar_vit/labels.csv') %>%
+      mutate(network = 'ViT') %>%
+    filter(epoch == 200)
+) %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ 'CD-3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ 'CD-2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ 'CD-1'
+    )
+  ) %>%
+  mutate(
+    conjunction_type = case_when(
+      (comp_0 == 'all') & (comp_1 == 'all') & (comp_2 == 'all') ~ 'intercept',
+      (comp_1 == 'all') & (comp_2 == 'all') ~ 'context only',
+      ((comp_0 == '0') & (comp_1 == 'all')) | ((comp_0 == '1') & (comp_2 == 'all')) ~ 'wrong conj',
+      ((comp_0 == '1') & (comp_1 == 'all')) | ((comp_0 == '0') & (comp_2 == 'all')) ~ 'right conj',
+      (comp_0 == 'all') & ((comp_1=='all') | (comp_2=='all')) ~ 'sensory feature',
+      (comp_0 == 'all') ~ 'sensory feature',
+      TRUE ~ 'memorization'
+    )
+  ) %>%
+  group_by(comp_0, comp_1, comp_2, leftout_conjunctions, conjunction_type, network) %>%
+  summarise(value = mean((value))) %>%
+  group_by(leftout_conjunctions, conjunction_type, network) %>%
+  summarise(value = mean(abs(value)))
+fig_r3_c <-
+  inner_join(
+  df,
+  df %>%
+    group_by(leftout_conjunctions, network) %>%
+    summarise(baseline = max(abs(value)))
+) %>%
+  mutate(
+    conjunction_type = conjunction_type %>%
+      factor(levels = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization')) %>%
+      fct_rev()
+  ) %>%
+  filter(conjunction_type != 'intercept') %>%
+  ggplot(aes(conjunction_type, abs(value/baseline), fill=leftout_conjunctions)) +
+  stat_summary(geom='bar', position='dodge', color='black', size=0.25) +
+  coord_flip() +
+  scale_x_discrete(breaks = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization'),
+                   labels = c('Right conj.', 'Wrong conj.', 'Sensory feat.', 'Context only', 'Memorization')) +
+  #scale_fill_manual(values = c('darkgreen', 'orange')) +
+  colorspace::scale_fill_discrete_qualitative('Harmonic', breaks = c('1', '2', '3'), labels = c('CDM-1', 'CDM-2', 'CDM-3')) +
+  labs(x = 'Conj. type', y = 'Value', fill='Task') +
+  my_theme +
+  scale_fill_manual(values = c(`CD-3` = '#11C638', `CD-2` = '#83D38A', `CD-1` = '#C4DEC6')) +
+  scale_y_continuous(breaks = c(0, 1)) +
+  facet_wrap(~network, ncol=1) +
+  theme(legend.position='top')
+fig_r3_c
+```
+
+```{r}
+fig_r3_a + fig_r3_b + fig_r3_c + plot_layout(nrow=1, widths = c(2,0.5,1)) + plot_annotation(tag_levels = 'a')
+ggsave('../figures/neurips/neurips-cdm-cifar.pdf', width = width, height = 0.6*width, units = 'cm')
+```
+

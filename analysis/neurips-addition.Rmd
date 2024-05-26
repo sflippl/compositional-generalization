@@ -1,0 +1,844 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-20"
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+library(reticulate)
+library(magrittr)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+linewidth <- 0.25
+```
+
+## Kernel models
+
+```{r}
+values_dispersed <- read_csv('../collated/D1_addition_dispersed/labels.csv') %>%
+  mutate(
+    sal=`sim_(1, 0)`
+  )
+values_dispersed <-
+  values_dispersed %>%
+  filter(if_else(comp_0=='all', comp_1!='all', comp_1=='all')) %>%
+  inner_join(
+    values_dispersed %>%
+      filter(comp_0=='all', comp_1=='all') %>%
+      select(-comp_0, -comp_1) %>%
+      rename(intercept=value)
+  ) %>%
+  mutate(value = value + intercept/2) %>%
+  mutate(
+    item = if_else(comp_0=='all', comp_1, comp_0) %>%
+      as.integer(),
+    component = if_else(comp_0=='all', '2', '1')
+  )
+fig_k_a <-
+  values_dispersed %>%
+  filter(task.instances_seed<=4) %>%
+  filter(sal %in% c(0.3, 0.4, 0.45, 0.49, 0.5)) %>%
+  ggplot(aes(item-4, value, color=sal, linetype=component, group=paste(sal, component))) +
+  geom_abline(slope=1, color='grey', linetype='dashed') +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=linewidth) +
+  my_theme +
+  coord_fixed() +
+  facet_wrap(~task.instances_seed, nrow=1) +
+  labs(x = 'Item', y = 'Value', linetype = 'Comp.', color = 'Sal_2(1)') +
+  scale_color_viridis_c(breaks = c(0.3, 0.5)) +
+  scale_y_continuous(breaks = c(-4, 0, 4), limits = c(-4, 4))
+fig_k_a
+```
+
+```{r}
+fig_b <-
+  values_dispersed %>%
+  filter(sal %in% c(0.3, 0.4, 0.45, 0.49, 0.5)) %>%
+  ggplot(aes(item-4, value, color=sal, group=sal)) +
+  geom_abline(slope=1, color='grey', linetype='dashed') +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=linewidth) +
+  my_theme +
+  coord_fixed() +
+  labs(x = 'Item', y = 'Value', color = 'Sal_2(1)') +
+  scale_color_viridis_c(breaks = c(0.3, 0.5)) +
+  scale_y_continuous(breaks = c(-4, 0, 4), limits = c(-4, 4))
+fig_b
+```
+
+```{r}
+fig_k_c <-
+  read_csv('../collated/D1_addition_dispersed/metrics.csv') %>%
+  filter(split == 'task=test', metric == 'mse') %>%
+  mutate(
+    sal=`sim_(1, 0)`
+  ) %>%
+  ggplot(aes(sal, value)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line') +
+  labs(y = 'Gen. loss', x = 'Sal_2(1)') +
+  my_theme
+fig_k_c
+```
+
+```{python}
+import numpy as np
+def random_binary_matrix(n, n_ones, seed=None):
+    rng = np.random.default_rng(seed)
+    mat = np.array([
+        [
+            int((j-i)%n<=n_ones-1) for j in range(n)
+        ] for i in range(n)
+    ])
+    rng.shuffle(mat)
+    return mat
+dis_1 = random_binary_matrix(9, 2, 1)
+dis_2 = random_binary_matrix(9, 2, 2)
+dis_3 = random_binary_matrix(9, 2, 3)
+dis_4 = random_binary_matrix(9, 2, 4)
+```
+
+```{r}
+schemas <-
+  expand.grid(
+    item1 = -4:4, item2 = -4:4, seed=1:4
+  ) %>%
+  as_tibble() %>%
+  mutate(
+    split = case_when(
+      seed==1 ~ map2_lgl(item1, item2, ~py$dis_1[..1+5, ..2+5]==1),
+      seed==2 ~ map2_lgl(item1, item2, ~py$dis_2[..1+5, ..2+5]==1),
+      seed==3 ~ map2_lgl(item1, item2, ~py$dis_3[..1+5, ..2+5]==1),
+      seed==4 ~ map2_lgl(item1, item2, ~py$dis_4[..1+5, ..2+5]==1)
+    ),
+    split = if_else(split, 'Train', 'Test')
+  )
+fig_d <-
+  schemas %>%
+  ggplot(aes(item1, item2, fill = split)) +
+  geom_tile() +
+  scale_x_continuous(breaks = c(-4, 4), labels = c('[-4]', '[4]')) +
+  scale_y_continuous(breaks = c(-4, 4), labels = c('[-4]', '[4]')) +
+  labs(x = 'Item 1', y = 'Item 2', fill = NULL) +
+  scale_fill_brewer(palette = 'Dark2') +
+  facet_wrap(~seed, nrow=1) +
+  my_theme +
+  coord_fixed() +
+  scale_fill_manual(breaks = c('Train', 'Test'), values=c('grey20', 'grey80'))
+fig_d
+```
+
+```{r}
+fig <- fig_d + fig_k_c + fig_k_a + fig_b + plot_layout(nrow=2, widths=c(4, 1))
+fig <- fig + plot_annotation(tag_levels = 'a')
+fig
+ggsave('../figures/neurips/neurips-addition-dispersed.pdf', width = width, height = 0.45*width, units = 'cm')
+```
+
+
+## Rich networks
+
+```{r}
+metrics_rich <-
+  read_csv('../collated/18_addition_rich/metrics.csv', guess_max = 1e5) %>%
+  pivot_longer(cols=c(train_loss, val_loss)) %>%
+  drop_na() %>%
+  mutate(
+    task = if_else(
+      task.training_selection == 'dispersed',
+      paste0('dispersed (', task.instances_seed, ')'),
+      task.training_comps
+    )
+  )
+last_epoch <-
+  metrics_rich %>%
+  group_by(model.network.log_scaling, model.network.hdims, model.network.seed, task, name) %>%
+  summarise(epoch = max(epoch))
+selector_rich <-
+  metrics_rich %>%
+  inner_join(last_epoch) %>%
+  filter(name == 'train_loss', value <= 1e-3) %>%
+  select(-name, -value)
+```
+
+```{r}
+additivity_rich <-
+  read_csv('../collated/18_addition_rich/additivity.csv', guess_max = 1e5) %>%
+  mutate(
+    task = if_else(
+      task.training_selection == 'dispersed',
+      paste0('dispersed (', task.instances_seed, ')'),
+      task.training_comps
+    )
+  )
+fig_s_rich_add <-
+  additivity_rich %>%
+  filter(epoch != 0) %>%
+  inner_join(
+    selector_rich %>%
+      select(-epoch, -step)
+  ) %>%
+  mutate(
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Interpolation', 'Both', 'Asymmetric', 'Dispersed (0)', 'Dispersed (1)', 'Dispersed (2)')
+      ),
+    scale = 10**model.network.log_scaling
+  ) %>%
+  filter(model.network.hdims=='[1000]') %>%
+  filter(task %in% c('Interpolation', 'Extrapolation', 'Both', 'Asymmetric')) %>%
+  ggplot(aes(scale, additivity, color=task, group=task)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2) +
+  stat_summary(geom='line', size=linewidth) +
+  scale_x_log10(breaks = c(1e-6, 1), labels = TeX(c('$10^{-6}$', '1'))) +
+  labs(x = 'Init. scale', y = 'Additivity', color = 'Task') +
+  scale_color_brewer(palette='Dark2') +
+  my_theme
+fig_s_rich_add
+```
+
+```{r}
+similarity_rich <-
+  read_csv('../collated/18_addition_rich/similarity_features.csv', guess_max = 1e5) %>%
+  filter(model.network.hdims=='[1000]', model.network.log_scaling %in% c(-6, -3, 0), layer==2) %>%
+  separate(col = spec0, into=c(NA, 'spec0_1', 'spec0_2')) %>%
+  separate(col = spec1, into=c(NA, 'spec1_1', 'spec1_2')) %>%
+  mutate(
+    training = if_else(epoch==0, 'before', 'after'),
+    trial_type = case_when(
+      (spec0_1==spec1_1)&(spec0_2==spec1_2)~'identical',
+      (spec0_1==spec1_1)|(spec0_2==spec1_2)~'overlapping',
+      TRUE~'distinct'
+    )
+  )
+similarity_rich <-
+  similarity_rich %>%
+  inner_join(
+    similarity_rich %>%
+      filter(trial_type%in% c('identical', 'distinct')) %>%
+      group_by(task.training_comps, model.network.log_scaling, model.network.seed, training, trial_type) %>%
+      summarise(array = mean(array)) %>%
+      pivot_wider(names_from = 'trial_type', values_from = 'array')
+  )
+fig_s_rich_sim <-
+  similarity_rich %>%
+  filter(model.network.log_scaling %in% c(-6, 0)) %>%
+  mutate(
+    training = factor(training, levels = c('before', 'after')),
+    regime = if_else(model.network.log_scaling==-6, 'rich', 'lazy') %>% factor(levels = c('lazy', 'rich')),
+  ) %>%
+  ggplot(aes((array-distinct)/(identical-distinct), color=trial_type, linetype=training)) +
+  geom_freqpoly(aes(y=after_stat(density)), bins=30, position='identity', size=linewidth) +
+  facet_wrap(~regime, nrow=1) +
+  coord_cartesian(xlim=c(-1,2)) +
+  my_theme +
+  labs(x = 'Normalized similarity', color = 'Trial type', linetype=NULL, y = 'Density') +
+  scale_linetype_discrete(labels = c('Before\ntraining', 'After\ntraining')) +
+  scale_color_brewer(palette = 'Set1')
+fig_s_rich_sim
+```
+
+```{r}
+values_rich <-
+  read_csv('../collated/18_addition_rich/labels.csv', guess_max = 1e5) %>%
+  filter(epoch != 0, model.network.hdims=='[1000]', model.network.log_scaling %in% c(-6, 0)) %>%
+  mutate(
+    task = if_else(
+      task.training_selection == 'dispersed',
+      paste0('dispersed (', task.instances_seed, ')'),
+      task.training_comps
+    ),
+    regime = if_else(model.network.log_scaling == -6, 'rich', 'lazy')
+  )
+values_rich <-
+  values_rich %>%
+  filter(if_else(comp_0=='all', comp_1!='all', comp_1=='all'), epoch!=0) %>%
+  inner_join(
+    values_rich %>%
+      filter(comp_0=='all', comp_1=='all') %>%
+      select(-comp_0, -comp_1) %>%
+      rename(intercept=value)
+  ) %>%
+  mutate(value = value + intercept/2) %>%
+  mutate(
+    item = if_else(comp_0=='all', comp_1, comp_0) %>%
+      as.integer(),
+    component = if_else(comp_0=='all', '2', '1')
+  )
+fig_s_values_rich <-
+  values_rich %>%
+  filter(model.network.log_scaling %in% c(-6, 0)) %>%
+  mutate(
+    regime = if_else(model.network.log_scaling==-6, 'rich', 'lazy') %>% factor(levels = c('lazy', 'rich')),
+  ) %>%
+  mutate(
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Interpolation', 'Both', 'Asymmetric', 'Dispersed (0)', 'Dispersed (1)', 'Dispersed (2)')
+      ),
+    scale = 10**model.network.log_scaling
+  ) %>%
+  filter(task %in% c('Interpolation', 'Extrapolation', 'Both', 'Asymmetric')) %>%
+  filter(
+    !case_when(
+      task == 'Interpolation' ~ item %in% c(0, 8),
+      task == 'Extrapolation' ~ item %in% c(4),
+      task == 'Both' ~ item %in% c(2, 6),
+      task == 'Asymmetric' ~ item %in% c(0)
+    )
+  ) %>%
+  ggplot(aes(item-4, value, color=regime, group=regime)) +
+  geom_abline(slope=1, color='grey', linetype='dashed') +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=linewidth) +
+  my_theme +
+  coord_fixed() +
+  facet_wrap(~task, nrow=1) +
+  scale_color_manual(values = c(lazy = '#1e996fff', rich = '#ffc617ff')) +
+  labs(x = 'Item', y = 'Value', linetype = 'Comp.', color = 'Regime')
+fig_s_values_rich
+```
+
+```{r}
+fig_d <-
+  values_rich %>%
+  filter(model.network.log_scaling %in% c(-6, 0)) %>%
+  mutate(
+    regime = if_else(model.network.log_scaling==-6, 'rich', 'lazy') %>% factor(levels = c('lazy', 'rich')),
+  ) %>%
+  mutate(
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Interpolation', 'Both', 'Asymmetric', 'Dispersed (0)', 'Dispersed (1)', 'Dispersed (2)')
+      ),
+    scale = 10**model.network.log_scaling
+  ) %>%
+  filter(task %in% c('Both')) %>%
+  filter(
+    item %in% c(3,4,5)
+  ) %>%
+  ggplot(aes(item-4, value, color=regime, group=regime)) +
+  geom_abline(slope=1, color='grey', linetype='dashed') +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=linewidth) +
+  my_theme +
+  coord_fixed() +
+  facet_wrap(~task, nrow=1) +
+  scale_color_manual(values = c(lazy = '#1e996fff', rich = '#ffc617ff')) +
+  labs(x = 'Item', y = 'Value', linetype = 'Comp.', color = 'Regime') +
+  scale_x_continuous(n.breaks=3) +
+  scale_y_continuous(n.breaks=3)
+```
+
+
+## Deep ReLU networks
+
+```{r}
+metrics_deep <-
+  read_csv('../collated/C13_addition_deep/metrics.csv', guess_max = 1e6) %>%
+  pivot_longer(cols=c(train_loss, val_loss)) %>%
+  drop_na() %>%
+  mutate(task = task.training_comps)
+last_epoch_deep <-
+  metrics_deep %>%
+  group_by(model.network.hdims, model.network.seed, task, name) %>%
+  summarise(epoch = max(epoch))
+selector_deep <-
+  metrics_deep %>%
+  inner_join(last_epoch_deep) %>%
+  filter(name == 'train_loss', value <= 1e-3) %>%
+  select(-name, -value)
+```
+
+```{r}
+additivity_deep <-
+  read_csv('../collated/C13_addition_deep/additivity.csv', guess_max = 1e5) %>%
+  mutate(
+    task = task.training_comps
+  )
+fig_s_deep_add <-
+  additivity_deep %>%
+  filter(epoch != 0) %>%
+  inner_join(
+    selector_deep %>%
+      select(-epoch, -step)
+  ) %>%
+  mutate(
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Interpolation', 'Both', 'Asymmetric')
+      ),
+    depth = str_count(model.network.hdims, coll(','))+1
+  ) %>%
+  filter(task %in% c('Interpolation', 'Extrapolation', 'Both', 'Asymmetric')) %>%
+  ggplot(aes(depth, additivity, color=task, group=task)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2) +
+  stat_summary(geom='line', size=linewidth) +
+  labs(x = 'Depth', y = 'Additivity', color = 'Task') +
+  scale_color_brewer(palette='Dark2') +
+  my_theme
+fig_s_deep_add
+```
+
+```{r}
+values_deep <-
+  read_csv('../collated/C13_addition_deep/labels.csv', guess_max = 1e5) %>%
+  filter(epoch != 0) %>%
+  mutate(
+    task = task.training_comps
+  )
+values_deep <-
+  values_deep %>%
+  filter(if_else(comp_0=='all', comp_1!='all', comp_1=='all'), epoch!=0) %>%
+  inner_join(
+    values_deep %>%
+      filter(comp_0=='all', comp_1=='all') %>%
+      select(-comp_0, -comp_1) %>%
+      rename(intercept=value)
+  ) %>%
+  mutate(value = value + intercept/2) %>%
+  mutate(
+    item = if_else(comp_0=='all', comp_1, comp_0) %>%
+      as.integer(),
+    component = if_else(comp_0=='all', '2', '1')
+  )
+fig_s_values_deep <-
+  values_deep %>%
+  mutate(
+    depth = str_count(model.network.hdims, coll(','))+1
+  ) %>%
+  mutate(
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Interpolation', 'Both', 'Asymmetric', 'Dispersed (0)', 'Dispersed (1)', 'Dispersed (2)')
+      )
+  ) %>%
+  filter(task %in% c('Interpolation', 'Extrapolation', 'Both', 'Asymmetric')) %>%
+  filter(
+    !case_when(
+      task == 'Interpolation' ~ item %in% c(0, 8),
+      task == 'Extrapolation' ~ item %in% c(4),
+      task == 'Both' ~ item %in% c(2, 6),
+      task == 'Asymmetric' ~ item %in% c(0)
+    )
+  ) %>%
+  ggplot(aes(item-4, value, color=depth, group=depth)) +
+  geom_abline(slope=1, color='grey', linetype='dashed') +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=linewidth) +
+  my_theme +
+  coord_fixed() +
+  facet_wrap(~task, nrow=1) +
+  labs(x = 'Item', y = 'Value', linetype = 'Comp.', color = 'Depth')
+fig_s_values_deep
+```
+
+
+
+```{r}
+fig <- fig_s_rich_add + fig_s_rich_sim + fig_s_values_rich + fig_d + fig_s_deep_add + fig_s_values_deep + plot_layout(design='122\n334\n566', heights=c(1,1,1))
+fig <- fig + plot_annotation(tag_levels = 'a')
+fig
+ggsave('../figures/neurips/neurips-addition-rich.pdf', width = width, height = 0.65*width, units = 'cm')
+```
+
+## Deep neural networks
+
+```{r}
+values_mnist <-
+  read_csv('../collated/19_addition_mnist/labels.csv') %>%
+  filter(epoch != 0) %>%
+  mutate(
+    task = if_else(
+      task.instances_seed != 'None',
+      paste0('dispersed (', task.instances_seed, ')'),
+      task.training_comps
+    ),
+    task_type = if_else(
+      task.instances_seed != 'None', 'dispersed', 'comps'
+    )
+  )
+values_mnist <-
+  values_mnist %>%
+  filter(if_else(comp_0=='all', comp_1!='all', comp_1=='all'), epoch!=0) %>%
+  inner_join(
+    values_mnist %>%
+      filter(comp_0=='all', comp_1=='all') %>%
+      select(-comp_0, -comp_1) %>%
+      rename(intercept=value)
+  ) %>%
+  mutate(value = value + intercept/2) %>%
+  mutate(
+    item = if_else(comp_0=='all', comp_1, comp_0) %>%
+      as.integer(),
+    component = if_else(comp_0=='all', '2', '1')
+  )
+fig_s_mnist_val <-
+  values_mnist %>%
+  mutate(
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Interpolation', 'Both', 'Asymmetric', 'Dispersed (0)', 'Dispersed (1)', 'Dispersed (2)')
+      )
+  ) %>%
+  filter(task %in% c('Interpolation', 'Extrapolation', 'Both', 'Asymmetric')) %>%
+  filter(
+    !case_when(
+      task == 'Interpolation' ~ item %in% c(0, 8),
+      task == 'Extrapolation' ~ item %in% c(4),
+      task == 'Both' ~ item %in% c(2, 6),
+      task == 'Asymmetric' ~ item %in% c(0)
+    )
+  ) %>%
+  ggplot(aes(item-4, value, color=embedding.input_generator.distance, group=embedding.input_generator.distance)) +
+  geom_abline(slope=1, color='grey', linetype='dashed') +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=linewidth) +
+  my_theme +
+  coord_fixed() +
+  scale_color_viridis_c(breaks = c(0, 20)) +
+  facet_wrap(~task, nrow=1) +
+  labs(x = 'Item', y = 'Value', linetype = 'Comp.', color = 'Distance')
+fig_s_mnist_val
+```
+
+```{r}
+metrics_mnist <- read_csv('../collated/19_addition_mnist/metrics.csv', guess_max = 1e5) %>%
+  pivot_longer(cols=starts_with('task=')) %>%
+  mutate(
+    task = if_else(
+      task.instances_seed != 'None',
+      paste0('dispersed (', task.instances_seed, ')'),
+      task.training_comps
+    ),
+    task_type = if_else(
+      task.instances_seed != 'None', 'dispersed', 'comps'
+    )
+  )
+last_epoch <-
+  metrics_mnist %>%
+  group_by(embedding.input_generator.seed, embedding.input_generator.distance, task, task_type, name) %>%
+  summarise(epoch = max(epoch))
+fig_s_mnist_gen <- 
+  metrics_mnist %>%
+  inner_join(last_epoch) %>%
+  select(-epoch, -step) %>%
+  mutate(
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Asymmetric', 'Interpolation', 'Both', 'Dispersed (0)', 'Dispersed (1)', 'Dispersed (2)')
+      )
+  ) %>%
+  mutate(
+    split = case_when(
+      name == 'task=train--input=train/mse'~'Training',
+      name == 'task=train--input=val_2/mse'~'In-distribution',
+      name == 'task=test--input=val_2/mse'~'Compositional'
+    ) %>%
+      factor(levels = c('Training', 'In-distribution', 'Compositional'))
+  ) %>%
+  filter(!stringr::str_detect(task, coll('Dispersed')), !is.na(split)) %>%
+  ggplot(aes(embedding.input_generator.distance, value, color=task, group=paste(task, split), linetype=split)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line') +
+  labs(x = 'Distance', y = 'MSE', color = 'Task', linetype='Generalization') +
+  scale_color_brewer(palette='Dark2') +
+  scale_x_continuous(n.breaks = 3) +
+  scale_y_continuous(n.breaks = 3) +
+  scale_linetype_manual(values = c('solid', '32', '11')) +
+  my_theme
+fig_s_mnist_gen
+```
+
+```{r}
+additivity_mnist <-
+  read_csv('../collated/19_addition_mnist/additivity.csv')
+fig_s_mnist_add <-
+  additivity_mnist %>%
+  filter(epoch != 0) %>%
+  mutate(
+    task = if_else(
+      task.instances_seed != 'None',
+      paste0('dispersed (', task.instances_seed, ')'),
+      task.training_comps
+    ),
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Asymmetric', 'Interpolation', 'Both', 'Dispersed (0)', 'Dispersed (1)', 'Dispersed (2)')
+      )
+  ) %>%
+  filter(!stringr::str_detect(task, coll('Dispersed'))) %>%
+  ggplot(aes(embedding.input_generator.distance, additivity, color=task, group=task)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2) +
+  stat_summary(geom='line') +
+  labs(x = 'Distance', y = 'Additivity', color = 'Task') +
+  scale_color_brewer(palette='Dark2') +
+  scale_x_continuous(n.breaks = 3) +
+  scale_y_continuous(n.breaks = 3) +
+  my_theme
+fig_s_mnist_add
+```
+
+```{r}
+fig <-
+  fig_s_mnist_gen + (fig_s_mnist_add + guides(color=guide_none())) + fig_s_mnist_val + plot_layout(design='12\n33') + plot_annotation(tag_levels = 'a')
+fig
+ggsave('../figures/neurips/neurips-addition-mnist.pdf', width = width*2/3, height = 0.45*width, units = 'cm')
+```
+
+```{r}
+fig_r1_a <-
+  bind_rows(
+    read_csv('../collated/C18_addition_resnet/metrics.csv') %>%
+      mutate(network = 'ResNet'),
+    read_csv('../collated/C16_vit_cifar_improved/metrics.csv') %>%
+      mutate(network = 'ViT')
+  ) %>%
+  mutate(
+    task = task.training_comps,
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Interpolation', 'Both', 'Asymmetric', 'Dispersed (0)', 'Dispersed (1)', 'Dispersed (2)')
+      )
+  ) %>%
+  pivot_longer(cols=starts_with('task=')) %>%
+  select(epoch, name, value, embedding.input_generator.seed, task, network) %>%
+  drop_na() %>%
+  separate(name, c(NA, 'task_split', NA, NA, 'input_split', NA), '[-,/,=]') %>%
+  mutate(
+    split = case_when(
+      input_split=='train' ~ 'Training set',
+      (input_split=='val_2')&(task_split=='train') ~ 'In-distribution',
+      (input_split=='val_2')&(task_split=='test') ~ 'Compositional'
+    ) %>% factor(levels = c('Training set', 'In-distribution', 'Compositional'))
+  ) %>%
+  filter(!is.na(split)) %>%
+  ggplot(aes(epoch, value, color=split, group=split)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend = FALSE,
+               fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line') +
+  facet_wrap(network~task, scales='free_x', nrow=2) +
+  scale_color_manual(
+    values = c('black', 'blue', 'orange')
+  ) +
+  scale_linetype_manual(
+    values = c('solid', '11'),
+    breaks = c('train', 'test'),
+    labels = c('Familiar combinations', 'Novel combinations')
+  ) +
+  labs(color = 'Generalization', x = 'Epoch', y = 'MSE') +
+  my_theme +
+  scale_x_continuous(breaks = c(10,100)) +
+  scale_y_log10(n.breaks = 3) +
+  theme(legend.position = 'top')
+fig_r1_a
+```
+
+```{r}
+fig_r1_b <-
+  bind_rows(
+    read_csv('../collated/C18_addition_resnet/additivity.csv') %>%
+    filter(epoch==99) %>%
+      mutate(network = 'ResNet'),
+    read_csv('../collated/C16_vit_cifar_improved/additivity.csv') %>%
+      mutate(network = 'ViT') %>%
+    filter((epoch == 179)|((epoch==99)&(task.training_comps=='[[4], [4]]')))
+  ) %>%
+  select(epoch, split, additivity, embedding.input_generator.seed, task.training_comps, network) %>%
+  mutate(
+    task = task.training_comps,
+    task = case_when(
+      task == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task == '[[0], [0]]' ~ 'Asymmetric',
+      task == '[[4], [4]]' ~ 'Extrapolation',
+      task == '[[2, 6], [2, 6]]' ~ 'Both',
+      task == 'dispersed (0)' ~ 'Dispersed (0)',
+      task == 'dispersed (1)' ~ 'Dispersed (1)',
+      task == 'dispersed (2)' ~ 'Dispersed (2)'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Interpolation', 'Both', 'Asymmetric', 'Dispersed (0)', 'Dispersed (1)', 'Dispersed (2)')
+      )
+  ) %>%
+  drop_na() %>%
+  separate(split, c(NA, 'task_split', NA, NA, 'input_split', NA), '[-,/,=]') %>%
+  ggplot(aes(task, additivity)) +
+  stat_summary(size=0.25, fun = mean, fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  facet_wrap(~network, nrow=2) +
+  labs(x = 'Task', y = 'Additivity') +
+  my_theme +
+  scale_y_continuous(n.breaks=4) +
+  theme(axis.text.x = element_text(angle=-30, hjust=0.))
+fig_r1_b
+```
+
+```{r}
+values_improved <-
+  bind_rows(
+    read_csv('../collated/C18_addition_resnet/labels.csv') %>%
+    filter(epoch == 100) %>%
+    mutate(
+      task = task.training_comps,
+      network = 'ResNet'
+    ),
+    read_csv('../collated/C16_vit_cifar_improved/labels.csv') %>%
+    filter((epoch == 179)|((epoch==99)&(task.training_comps=='[[4], [4]]'))) %>%
+    mutate(
+      task = task.training_comps,
+      network = 'ViT'
+    ),
+  ) %>%
+  mutate(
+    task = case_when(
+      task.training_comps == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task.training_comps == '[[4], [4]]' ~ 'Extrapolation',
+      task.training_comps == '[[0], [0]]' ~ 'Asymmetric',
+      task.training_comps == '[[2, 6], [2, 6]]' ~ 'Both'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Interpolation', 'Both', 'Asymmetric')
+      )
+  )
+values_improved <-
+  values_improved %>%
+  filter(if_else(comp_0=='all', comp_1!='all', comp_1=='all'), epoch!=0) %>%
+  inner_join(
+    values_improved %>%
+      filter(comp_0=='all', comp_1=='all') %>%
+      select(-comp_0, -comp_1) %>%
+      rename(intercept=value)
+  ) %>%
+  mutate(value = value + intercept/2) %>%
+  mutate(
+    item = if_else(comp_0=='all', comp_1, comp_0) %>%
+      as.integer(),
+    component = if_else(comp_0=='all', '2', '1')
+  )
+fig_r2_c <-
+  values_improved %>%
+  filter(
+    !case_when(
+      task == 'Interpolation' ~ item %in% c(0, 8),
+      task == 'Extrapolation' ~ item %in% c(4),
+      task == 'Both' ~ item %in% c(2, 6),
+      task == 'Asymmetric' ~ item %in% c(0)
+    )
+  ) %>%
+  ggplot(aes(item-4, value, color=task, group=task)) +
+  geom_abline(slope=1, abline=0, color='grey', linetype='dashed') +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2) +
+  stat_summary(geom='line') +
+  stat_summary(geom='point', size=1) +
+  theme_bw() +
+  coord_fixed() +
+  scale_color_brewer(palette='Dark2') +
+  facet_wrap(~network, ncol=1) +
+  labs(x = 'Item', y = 'Inferred value', color = 'Task') +
+  my_theme
+fig_r2_c
+```
+
+```{r}
+fig <- fig_r1_a + fig_r1_b + fig_r2_c + plot_layout(nrow=1, widths = c(2,0.5,1)) + plot_annotation(tag_levels = 'a')
+fig & theme(legend.position='top', legend.direction='vertical')
+ggsave('../figures/neurips/neurips-addition-cifar.pdf', width = width, height = 0.65*width, units = 'cm')
+```
+

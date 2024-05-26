@@ -1,0 +1,36 @@
+defaults:
+  - config1
+  - override task: context_dependence
+  - override hydra/launcher: submitit_slurm
+  - _self_
+
+hydra:
+  sweeper:
+    params:
+      model.network.log_scaling: range(-6, 0.25, 1)
+      model.network.seed: range(0, 6, 1)
+      model.trainer_config.criterion: choice(crossentropy, mse)
+  launcher:
+    cpus_per_task: 1
+    mem_gb: 15
+    timeout_min: 300
+    exclude: ax[01,06,17]
+task:
+  contexts: 2
+  features: [6,6]
+  context_to_feature: [0,1]
+  feature_to_response: [[-1,-1,-1,1,1,1], [-1,-1,-1, 1, 1,1]]
+  leftout_conjunctions: [{1: [0], 2: [3]}]
+model:
+  trainer_config:
+    max_epochs: 5000
+    lr: 1.
+    auto_lr_find: true
+    analyse_every_n_epoch: -1
+    early_stopping: true
+    early_stopping_stopping_threshold: 1e-4
+    early_stopping_divergence_threshold: 200
+  network:
+    hdims: [1000]
+analysis: [additivity]
+metrics: [mse, binary_accuracy]

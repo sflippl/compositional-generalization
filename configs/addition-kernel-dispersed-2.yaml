@@ -1,0 +1,19 @@
+defaults:
+  - config1
+  - override model: kernel_machine
+  - _self_
+
+hydra:
+  sweeper:
+    params:
+      task.instances_seed: range(1,51)
+task:
+  task_values: [[-4,-3,-2,-1,0,1,2,3,4], [-4,-3,-2,-1,0,1,2,3,4]]
+  training_selection: dispersed
+embedding:
+  input_generator:
+    type: identity
+model:
+  C: 1e10
+analysis: [additivity]
+metrics: [mse]

@@ -1,0 +1,29 @@
+defaults:
+  - config1
+  - override model: kernel_machine
+  - override task: context_dependence
+  - override hydra/launcher: submitit_slurm
+  - _self_
+
+hydra:
+  sweeper:
+    params:
+      model.objective: choice(classification)
+  launcher:
+    cpus_per_task: 1
+    mem_gb: 10
+    timeout_min: 60
+    exclude: ax[17]
+task:
+  contexts: 2
+  features: [6,6]
+  context_to_feature: [0,1]
+  feature_to_response: [[-1,-1,-1,1,1,1], [-1,-1,-1, 1, 1,1]]
+  leftout_conjunctions: [{1: [0,1,2], 2: [3,4,5]}]
+embedding:
+  input_generator:
+    type: identity
+model:
+  C: 1e10
+  sims: {'0': 0., 'rel_1': 'np.linspace(0., 1/2, 50)', '2': 'np.linspace(0., 2/3, 50)', '3': 1., '1': 0.5}
+metrics: [mse, binary_accuracy]

@@ -1,0 +1,227 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+library(magrittr)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+linewidth <- 0.25
+```
+
+```{r}
+metrics_rich <-
+  read_csv('../collated/23_te_rich/metrics.csv') %>%
+  filter(!is.na(val_loss), (epoch<=100)|(epoch %% 10 == 0)) %>%
+  select(-step, -train_loss) %>%
+  pivot_longer(cols=starts_with('task')) %>%
+  separate(col=name, into=c(NA, 'task_split', 'metric'), sep="[(--),=,/]")
+dat <-
+  metrics_rich %>%
+  filter(model.network.log_scaling %in% c(-6, 0), metric=='binary_accuracy', epoch<=2000) %>%
+  mutate(regime = if_else(model.network.log_scaling==0, 'Lazy', 'Rich')) %>%
+  arrange(task_split)
+fig_a <- dat %>%
+  filter(model.trainer_config.criterion=='mse') %>%
+  ggplot(aes(epoch, value, color=paste0(regime, ' (', task_split, ')'), linetype=paste0(regime, ' (', task_split, ')'), group = paste(regime,task_split))) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend=FALSE, fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', data = dat %>% filter(task_split == 'train')) +
+  stat_summary(geom='line', data = dat %>% filter(task_split == 'test')) +
+  scale_x_log10(breaks = c(10, 1000)) +
+  my_theme +
+  scale_y_continuous(limits = c(NA, 1), breaks = c(0.5, 1)) +
+  scale_color_manual(values = c(`Lazy (train)` = '#1e996fff', `Lazy (test)` = '#0f4d38ff', `Rich (train)` = '#ffc617ff', `Rich (test)` = '#b26300ff')) +
+  scale_linetype_manual(values = c(`Lazy (train)` = 'solid', `Lazy (test)` = '11', `Rich (train)` = 'solid', `Rich (test)` = '11')) +
+  labs(color = 'Regime', y = 'Acc.', x='Epoch', linetype = 'Regime')
+fig_a
+```
+
+```{r}
+name_select <- function(x, i) {
+  x <- stringr::str_split_fixed(x, stringr::coll('--'), n=i+1)[,i]
+  x <- stringr::str_split_fixed(x, stringr::coll('='), n=2)[,2]
+  x
+}
+core_df_2 <-
+  tibble::tibble(
+    folder = list.files('../data/exp_2')
+  ) %>%
+  dplyr::mutate(
+    regime = if_else(readr::parse_double(name_select(folder, 2))==0.001, 'rich', 'lazy'),
+    model_seed = readr::parse_integer(name_select(folder, 1)),
+    exists = purrr::map_lgl(folder, ~file.exists(paste0('../data/exp_2/', ., '/outputs.feather')))
+  )
+
+df_2_margins <-
+  core_df_2 %>%
+  dplyr::filter(exists) %>%
+  dplyr::mutate(
+    data = purrr::map(
+      folder,
+      ~arrow::read_feather(
+        paste0('../data/exp_2/', ., '/outputs.feather')
+      )
+    )
+  ) %>%
+  tidyr::unnest(
+    cols = c(data)
+  ) %>%
+  dplyr::select(-folder, -exists) %>%
+  mutate(
+    margin = if_else(input %in% c('(0, 0)', '(0, 1)', '(1, 0)', '(1, 1)', '(2, 2)', '(2, 3)', '(3, 2)', '(3, 3)'), output, -output),
+    split = if_else(input %in% c('(0, 1)', '(0, 3)', '(2, 1)', '(2, 3)'), 'test', 'train')
+  )
+df_2_weights <-
+  core_df_2 %>%
+  dplyr::filter(exists) %>%
+  dplyr::mutate(
+    data = purrr::map(
+      folder,
+      ~arrow::read_feather(
+        paste0('../data/exp_2/', ., '/weights.feather')
+      )
+    )
+  ) %>%
+  tidyr::unnest(
+    cols = c(data)
+  ) %>%
+  dplyr::select(-folder, -exists)
+```
+
+```{r}
+df_c <-
+  df_2_weights %>%
+  filter(regime == 'rich') %>%
+  mutate(feature = paste0('f', feature)) %>%
+  pivot_wider(names_from = 'feature', values_from = 'weight') %>%
+  mutate(A_vs_C = foutput*(f0-f2), a_vs_c = foutput*(f4-f6))
+df_c_a <-
+  df_c %>%
+  filter(abs(A_vs_C)>= 0.0025, abs(a_vs_c)>=0.0025)
+df_c_b <-
+  df_c %>%
+  filter(abs(A_vs_C)<= 0.0025, abs(a_vs_c)<=0.0025)
+fig_b <-
+  bind_rows(
+    df_c[sample.int(nrow(df_c_a), size=1000),],
+    df_c[sample.int(nrow(df_c_b), size=1000),]
+  ) %>%
+  ggplot(aes(A_vs_C, a_vs_c, color=factor(sign(foutput)))) +
+  geom_point(alpha=1, shape='.') +
+  coord_equal(xlim = c(-0.01, 0.01), ylim=c(-0.01, 0.01)) +
+  scale_color_manual(values = c(`-1` = scales::muted('red'), `1`=scales::muted('blue')), labels = c('Neg.', 'Pos.')) +
+  my_theme +
+    labs(x=NULL, y=NULL, color='Unit sign') +
+  guides(colour = guide_legend(override.aes= list(alpha = 1))) +
+  scale_y_continuous(breaks=c(-0.01, 0.01)) +
+  scale_x_continuous(breaks=c(-0.01, 0.01)) +
+  geom_label(inherit.aes=FALSE, data = tibble(x = c(1,1,-1,-1), y=c(1,-1,1,-1), text=c('AB', 'AE', 'DB', 'DE')), mapping = aes(x=0.0075*x, y=0.0075*y, label=text), size=1.5, label.padding = unit(0.1, "lines"))
+fig_b
+```
+
+```{r}
+df_2_comp <-
+  df_2_weights %>%
+  filter(regime=='rich', feature != 'output') %>%
+  mutate(component = if_else(as.integer(feature)<=3, '1', '2')) %>%
+  inner_join(
+    df_2_weights %>%
+      filter(regime == 'rich', feature == 'output') %>%
+      select(-feature) %>%
+      rename(output = weight)
+  ) %>%
+  mutate(weight = output*weight) %>%
+  select(-output)
+df_2_comp <-
+  inner_join(
+  df_2_comp %>% mutate(feat_1 = as.integer(feature) %% 4, weight_2=weight) %>% select(-feature,-weight),
+  df_2_comp %>% mutate(feat_2 = as.integer(feature) %% 4, weight_1=weight) %>% select(-feature, -weight)
+) %>%
+  mutate(
+    type = if_else((feat_1<=1)==(feat_2<=1), 'Equivalent', 'Not equivalent')
+  )
+df_2_comp_a <-
+  df_2_comp %>% filter(abs(weight_1)>= 0.001, abs(weight_2)>=0.001)
+df_2_comp_b <-
+  df_2_comp %>% filter(abs(weight_1)<= 0.001, abs(weight_2)<=0.001)
+df_2_comp <-
+  bind_rows(
+    df_2_comp_a[sample.int(nrow(df_2_comp_a), size=1000),],
+    df_2_comp_b[sample.int(nrow(df_2_comp_b), size=1000),]
+  )
+fig_c <-
+  df_2_comp %>%
+  ggplot(aes(weight_1, weight_2, color=type)) +
+  geom_point(shape='.') +
+  my_theme +
+  coord_equal(xlim=c(-0.006, 0.006), ylim=c(-0.006, 0.006)) +
+  scale_color_manual(values = c(Equivalent = 'purple', `Not equivalent` = 'darkgreen'), labels = c('Eq.', 'Not eq.')) +
+  guides(color = guide_legend(override.aes= list(alpha = 1))) +
+  labs(x=NULL, y=NULL, color=NULL) +
+  scale_x_continuous(breaks=c(-0.005, 0.005)) +
+  scale_y_continuous(breaks=c(-0.005, 0.005))
+fig_c
+```
+
+```{r}
+metrics_mnist <-
+  read_csv('../collated/24_te_mnist/metrics.csv') %>%
+  filter(!is.na(val_loss)) %>%
+  mutate(
+    train_items = if_else(task.train_items == '[1, 1]', '1', '4')
+  ) %>%
+  select(-step, -train_loss, -task.train_items) %>%
+  pivot_longer(cols=starts_with('task')) %>%
+  separate(col=name, into=c(NA, 'task_split', NA, NA, 'embedding_split', 'metric'), sep="[(--),=,/]")
+se <- function(x) sd(x)/sqrt(length(x))
+fig_d <-
+  metrics_mnist %>%
+  filter(epoch == 150, train_items=='4', model.trainer_config.criterion=='crossentropy', metric=='binary_accuracy', embedding_split %in% c('val_2', 'train')) %>%
+  mutate(
+    generalization = case_when(
+      embedding_split == 'train' ~ 'Training set',
+      task_split == 'train' ~ 'In-distribution',
+      task_split == 'test' ~ 'Compositional'
+    ) %>% factor(levels = c('Training set', 'In-distribution', 'Compositional'))
+  ) %>%
+  ggplot(aes(embedding.input_generator.distance, value, color=generalization, group=generalization)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=.25) +
+  my_theme +
+  labs(y = 'Acc.', x = 'Dist.', color='Split', linetype=NULL) +
+  scale_color_manual(
+    values = c('black', 'blue', 'orange')
+  ) +
+  guides(linetype=guide_none()) +
+  scale_x_continuous(breaks = c(0, 20)) +
+  scale_y_continuous(breaks = c(0.5, 1), limits = c(NA, 1))
+fig_d
+```
+
+```{r}
+fig <- 
+  fig_a + fig_b + fig_c + fig_d + plot_layout(nrow=1) + plot_annotation(tag_levels = 'a')
+fig & theme(legend.position='top')
+ggsave('../figures/neurips/neurips-4.pdf', width = width*2/3, height = 0.3*width, units = 'cm')
+```
+

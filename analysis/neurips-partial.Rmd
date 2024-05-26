@@ -1,0 +1,88 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+linewidth <- 0.25
+```
+
+```{r}
+schema <-
+  expand.grid(
+    item1 = c(-1, 1),
+    item2 = c(-1, 1),
+    task = c('Invariance', 'Partial\nexposure')
+  ) %>%
+  as_tibble() %>%
+  mutate(
+    y = if_else(item1==-1, -1, 1),
+    split = if_else(
+      task == 'Invariance',
+      if_else(item2==-1, 'Train', 'Test'),
+      if_else((item2==-1)|(item1==-1), 'Train', 'Test')
+    )
+  ) %>%
+  ggplot(aes(item2, item1, fill=factor(y), alpha=split)) +
+  geom_tile() +
+  my_theme +
+  scale_alpha_manual(values = c(Train = 1., Test = 0.8), labels = c('Train', 'Test')) +
+  scale_fill_manual(values=c(`1`=scales::muted('blue'), `-1`=scales::muted('red')), labels = c('Class 1', 'Class 2')) +
+  labs(x = 'Item 1', y = 'Item 2', fill = NULL, alpha=NULL) +
+  coord_fixed() +
+  facet_wrap(~task, nrow=1) +
+  theme(strip.placement = 'outside') +
+  scale_x_continuous(breaks = c(-1, 1)) +
+  scale_y_continuous(breaks = c(-1, 1))
+schema
+```
+
+```{r}
+performance <-
+  expand.grid(
+  k = seq(0, 0.5, 0.01),
+  task = c('Invariance', 'Partial\nexposure')
+) %>%
+  mutate(
+    margin = if_else(
+      task == 'Invariance',
+      k/(1-k), 2*k**2/(1-2*k**2)
+    )
+  ) %>%
+  ggplot(aes(k, margin, color=task)) +
+  geom_line() +
+  my_theme +
+  labs(color=NULL, x = 'Sim.', y = 'Margin') +
+  colorspace::scale_color_discrete_qualitative(palette = 'Cold') +
+  scale_x_continuous(breaks = c(0, 0.5)) +
+  scale_y_continuous(breaks = c(0, 1))
+performance
+```
+
+
+```{r}
+schema + performance + plot_layout(nrow=1, widths=c(2,1)) + plot_annotation(tag_levels='a')
+ggsave('../figures/neurips/neurips-partial.pdf', width = width*3/4, height = 0.3*width, units = 'cm')
+```
+

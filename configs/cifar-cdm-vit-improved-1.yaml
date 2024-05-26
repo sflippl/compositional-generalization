@@ -1,0 +1,57 @@
+defaults:
+  - config1
+  - override model/network: vit
+  - override task: context_dependence
+  - override hydra/launcher: submitit_slurm
+  - override embedding.input_generator: image
+  - _self_
+
+hydra:
+  sweeper:
+    params:
+      embedding.input_generator.seed: range(0,10,1)
+      embedding.input_generator.distance: choice(0)
+      model.trainer_config.criterion: choice(crossentropy)
+  launcher:
+    cpus_per_task: 1
+    gres: gpu:1
+    mem_gb: 15
+    timeout_min: 1800
+    exclude: ax[01,06,17]
+task:
+  contexts: 2
+  features: [6,6]
+  context_to_feature: [0,1]
+  feature_to_response: [[-1,-1,-1,1,1,1], [-1,-1,-1, 1, 1,1]]
+  leftout_conjunctions: [{1: [0,1,2], 2: [3,4,5]}]
+embedding:
+  input_generator:
+    dataset: cifar10
+    n_training_samples_total: 40000
+    n_training_imgs: 4000
+    separate_channels: true
+    permutation: random
+    permutation_seed: ${embedding.input_generator.seed}
+    augmentation: [flip, crop]
+model:
+  trainer_config:
+    accelerator: gpu
+    max_epochs: 200
+    lr: 1e-4
+    auto_lr_find: false
+    analyse_every_n_epoch: -1
+    momentum: 0.9
+    batch_training: true
+    batch_testing: true
+    num_workers: 2
+    test_batch_size: 256
+    check_val_every_n_epoch: 20
+    optimizer: adam
+  network:
+    seed: ${embedding.input_generator.seed}
+    heads: 6
+    mlp_dim: 256
+    dim: 256
+    depth: 4
+analysis: [additivity]
+metrics: [binary_accuracy]

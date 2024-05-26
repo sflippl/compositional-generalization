@@ -1,0 +1,77 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+linewidth <- 0.25
+```
+
+```{r}
+values_rich <- read_csv('../collated/C14_cdm_deep/labels.csv') %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ 'CD-3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ 'CD-2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ 'CD-1'
+    ) %>% factor(levels = c('CD-3', 'CD-2', 'CD-1')),
+    depth = str_count(model.network.hdims, coll(','))+1
+  ) %>%
+  mutate(
+    conjunction_type = case_when(
+      (comp_0 == 'all') & (comp_1 == 'all') & (comp_2 == 'all') ~ 'intercept',
+      (comp_1 == 'all') & (comp_2 == 'all') ~ 'context only',
+      ((comp_0 == '0') & (comp_1 == 'all')) | ((comp_0 == '1') & (comp_2 == 'all')) ~ 'wrong conj',
+      ((comp_0 == '1') & (comp_1 == 'all')) | ((comp_0 == '0') & (comp_2 == 'all')) ~ 'right conj',
+      (comp_0 == 'all') & ((comp_1=='all') | (comp_2=='all')) ~ 'sensory feature',
+      (comp_0 == 'all') ~ 'sensory feature',
+      TRUE ~ 'memorization'
+    )
+  )
+fig_a <-
+  values_rich %>%
+  group_by(comp_0, comp_1, comp_2, leftout_conjunctions, conjunction_type, depth) %>%
+  summarise(value = mean(value)) %>%
+  mutate(
+    conjunction_type = conjunction_type %>%
+      factor(levels = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization')) %>%
+      fct_rev()
+  ) %>%
+  filter(conjunction_type != 'intercept') %>%
+  ggplot(aes(conjunction_type, abs(value), fill=depth, group=depth)) +
+  stat_summary(geom='bar', position='dodge', color=NA) +
+  coord_flip() +
+  scale_x_discrete(breaks = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization'),
+                   labels = c('Right conj.', 'Wrong conj.', 'Sensory feat.', 'Context only', 'Memorization')) +
+  #scale_fill_manual(values = c('darkgreen', 'orange')) +
+  facet_wrap(~leftout_conjunctions) +
+  labs(x = 'Conj. type', y = 'Value', fill='Depth') +
+  my_theme
+```
+
+```{r}
+fig_a
+ggsave('../figures/neurips/neurips-cdm-rich.pdf', width = width/2, height = 0.3*width, units = 'cm')
+```
+

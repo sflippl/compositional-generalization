@@ -1,0 +1,278 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+linewidth <- 0.25
+```
+
+```{r}
+k_relu <- function(x, leak) {
+  (leak-1)**2*(sqrt(1-x**2)+(pi-acos(x))*x)/(2*pi) + leak*x
+}
+k_remos <- function(x, n) {
+  x <- acos(x)
+  if(n == 0) {
+    return(pi-x)
+  }
+  if(n == 1) {
+    return(sin(x)+(pi-x)*cos(x))
+  }
+  if(n == 2) {
+    return(3*sin(x)*cos(x)+(pi-x)*(1+2*(cos(x))**2))
+  }
+}
+k_gaussian <- function(x, A) {
+  1/sqrt((2*A+1)**2-(2*A*x)**2)
+}
+k <- function(x, rho) {
+  x+rho*(sqrt(1-x**2)-acos(x)*x)/pi
+}
+get_kappas <- function(k, l, C) {
+  kappas <- c()
+  for(c in 0:C) {
+    kappas <- c(kappas, (c/C))
+  }
+  salience <- c(kappas[1])
+  for(c in 1:C) {
+    salience <- c(salience, kappas[c+1]-sum(choose(c, 0:(c-1))*salience))
+  }
+  df <- tibble()
+  for(c in 0:C){
+    df <- bind_rows(
+      df,
+      tibble(
+        c=c,
+        kappa=kappas[c+1],
+        l=0,
+        salience = salience[c+1]
+      )
+    )
+  }
+  for(l in 1:l){
+    kappa_id <- kappas[C+1]
+    for(c in 0:C) {
+      kappas[c+1] <- k(kappas[c+1]/kappa_id)
+    }
+    salience <- c(kappas[1])
+    for(c in 1:C) {
+      salience <- c(salience, kappas[c+1]-sum(choose(c, 0:(c-1))*salience))
+    }
+    for(c in 0:C){
+      df <- bind_rows(
+        df,
+        tibble(
+          c=c,
+          kappa=kappas[c+1],
+          salience = salience[c+1],
+          l=l
+        )
+      )
+    }
+  }
+  df
+}
+```
+
+```{r}
+get_kappas_2 <- function(k, l, overlap_1=0.5) {
+  kappas <- c(0., overlap_1, 1-overlap_1, 1.)
+  salience <- c(0., kappas[2], kappas[3], 0.)
+  df <- tibble(
+    conjunction = c('0', '1', '2', '12'),
+    l = 0,
+    salience = salience,
+    kappa = kappas
+  )
+  for(l in 1:l){
+    kappa_id <- kappas[length(kappas)]
+    kappas <- k(kappas/kappa_id)
+    salience <- c(kappas[1], kappas[2]-kappas[1], kappas[3]-kappas[1], kappas[4]+kappas[1]-(kappas[2]+kappas[3]))/(kappas[4]-kappas[1])
+    df <- bind_rows(
+      df,
+      tibble(
+        conjunction = c('0', '1', '2', '12'),
+        l = l,
+        salience = salience,
+        kappa = kappas
+      )
+    )
+  }
+  df
+}
+```
+
+
+```{r}
+preprocess_df <- function(df) {
+  df %>%
+    inner_join(
+      df %>%
+        filter(c == 0) %>%
+        rename(distinct = kappa) %>%
+        select(-c, -salience)
+    ) %>%
+    inner_join(
+      df %>%
+        filter(c == max(df$c)) %>%
+        rename(identical = kappa) %>%
+        select(-c, -salience)
+    ) %>%
+    mutate(
+      salience = salience/(identical-distinct)
+    ) %>%
+    filter(c!=0)
+}
+```
+
+```{r}
+preprocess_df_2 <- function(df) {
+  df %>%
+    inner_join(
+      df %>%
+        filter(conjunction == '0') %>%
+        rename(distinct = kappa) %>%
+        select(-conjunction, -salience)
+    ) %>%
+    inner_join(
+      df %>%
+        filter(conjunction == '12') %>%
+        rename(identical = kappa) %>%
+        select(-conjunction, -salience)
+    ) %>%
+    # mutate(
+    #   salience = salience/(identical-distinct)
+    # ) %>%
+    filter(conjunction != '0')
+}
+```
+
+```{r}
+df <- tibble()
+L <- 100
+for(overlap_1 in c(0.1, 0.3, 0.4, 0.5)) {
+  df <- bind_rows(
+    df,
+    bind_rows(
+    get_kappas_2(function(x) k_relu(x, leak=0), L, overlap_1) %>%
+      mutate(nonlinearity = 'ReLU'),
+    get_kappas_2(function(x) k_relu(x, leak=0.1), L, overlap_1) %>%
+      mutate(nonlinearity = 'Leaky\nrelu'),
+    get_kappas_2(function(x) k_remos(x, n=0), L, overlap_1) %>%
+      mutate(nonlinearity = 'Step\nfunction'),
+    get_kappas_2(function(x) k_remos(x, n=2), L, overlap_1) %>%
+      mutate(nonlinearity = 'Rect.\nquad.'),
+    get_kappas_2(function(x) k_gaussian(x, 1), L, overlap_1) %>%
+      mutate(nonlinearity = 'Gaussian')
+  ) %>% mutate(overlap_1=overlap_1) %>% preprocess_df_2()
+  )
+}
+```
+
+```{r}
+fig_a <-
+  df %>%
+  mutate(
+    nonlinearity = factor(
+      nonlinearity,
+      c('Step\nfunction', 'ReLU', 'Leaky\nrelu', 'Rect.\nquad.', 'Gaussian')
+    )
+  ) %>%
+  mutate(
+    conjunction = factor(conjunction, levels = c('1', '2', '12'))
+  ) %>%
+  filter(l<=20) %>%
+  ggplot(aes(l, salience, color = overlap_1, group=overlap_1)) +
+  geom_line(size=linewidth) +
+  my_theme +
+  facet_grid(conjunction~nonlinearity) +
+  scale_y_continuous(n.breaks = 3) +
+  scale_x_continuous(breaks = c(0, 10, 20)) +
+  labs(x = '# Layers', y = 'Salience', color='Salience\nof first comp.') +
+  scale_color_viridis_c(option='magma', end=0.7) +
+  ylim(0,1)
+fig_a
+```
+
+
+```{r}
+df <- tibble()
+L <- 100
+for(n in 2:4) {
+  df <- bind_rows(
+    df,
+    bind_rows(
+    get_kappas(function(x) k_relu(x, leak=0), L, n) %>%
+      mutate(nonlinearity = 'Rectified linear'),
+    get_kappas(function(x) k_relu(x, leak=0.1), L, n) %>%
+      mutate(nonlinearity = 'Leaky relu'),
+    get_kappas(function(x) k_remos(x, n=0), L, n) %>%
+      mutate(nonlinearity = 'Step function'),
+    get_kappas(function(x) k_remos(x, n=2), L, n) %>%
+      mutate(nonlinearity = 'Rectified quadratic'),
+    get_kappas(function(x) k_gaussian(x, 1), L, n) %>%
+      mutate(nonlinearity = 'Gaussian')
+  ) %>% mutate(n=n) %>% preprocess_df()
+  )
+}
+```
+
+```{r}
+fig_b <-
+  df %>%
+  mutate(
+    nonlinearity = factor(
+      nonlinearity,
+      c('Step function', 'Rectified linear', 'Leaky relu', 'Rectified quadratic', 'Gaussian')
+    ),
+    salience_label = paste('Overlap', c)
+  ) %>%
+  filter(l<=20, n%in%c(4)) %>%
+  ggplot(aes(l, salience, color = nonlinearity)) +
+  geom_line(size=linewidth) +
+  my_theme +
+  facet_wrap(~salience_label, scales='free_y', ncol=1) +
+  scale_y_continuous(n.breaks = 3) +
+  scale_x_continuous(breaks = c(0, 10, 20)) +
+  labs(x = '# Layers', y = 'Salience', color='Nonlinearity') +
+  scale_color_manual(values=c('magenta4', 'navy', 'brown', 'red', 'royalblue'),
+                     labels=c('Step fun.', 'ReLU', 'Leaky ReLU', 'Rect. quad.', 'Gaussian')) +
+  geom_hline(
+    mapping = aes(yintercept = y),
+    data = tibble(
+      salience_label = paste('Overlap', 1:4),
+      y = c(1/4, 1/6, 1/4, 1)
+    ),
+    color = 'black',
+    linetype = '11'
+  )
+fig_b
+```
+
+```{r}
+fig_a + fig_b + plot_layout(nrow=1, widths= c(4,1)) + plot_annotation(tag_levels='a')
+ggsave('../figures/neurips/neurips-sim.pdf', width = width, height = 0.6*width, units = 'cm')
+```
+

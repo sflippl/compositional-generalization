@@ -1,0 +1,52 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+linewidth <- 0.25
+```
+
+```{r}
+read_csv('../collated/C17_equivalence_deep/metrics.csv', guess_max=1e5) %>%
+  pivot_longer(starts_with('task=')) %>%
+  select(-train_loss) %>%
+  drop_na() %>%
+  mutate(depth = str_count(model.network.hdims, coll(','))+1) %>%
+  mutate(
+    split = if_else(
+      name == 'task=test/binary_accuracy', 'test', 'train'
+    )
+  ) %>%
+  ggplot(aes(epoch, value, linetype=split, group = paste(split, depth))) +
+  stat_summary(geom='line') +
+  my_theme +
+  facet_wrap(~depth, nrow=1) +
+  scale_linetype_manual(values = c('solid', '11'), breaks = c('train', 'test')) +
+  scale_x_log10(breaks = c(10, 1000)) +
+  scale_y_continuous(n.breaks = 3) +
+  labs(x = 'Epochs', y = 'Accuracy', linetype='Split')
+ggsave('../figures/neurips/neurips-te-deep.pdf', width = width*2/3, height = 0.25*width, units = 'cm')
+```
+

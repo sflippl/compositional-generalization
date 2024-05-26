@@ -1,0 +1,27 @@
+defaults:
+  - config1
+  - override hydra/launcher: submitit_slurm
+  - override task: transitive_equivalence
+  - _self_
+
+hydra:
+  sweeper:
+    params:
+      model.network.hdims: choice([10000])
+      model.network.log_scaling: range(-6, 0.5, 1)
+      model.network.seed: range(0, 6, 1)
+      model.trainer_config.criterion: choice(mse, crossentropy)
+  launcher:
+    cpus_per_task: 1
+    mem_gb: 10
+    timeout_min: 240
+model:
+  trainer_config:
+    max_epochs: 10000
+    auto_lr_find: true
+    lr: 1e-1
+    analyse_every_n_epoch: -1
+    analyse_first_n_epochs: -1
+    early_stopping: true
+    early_stopping_stopping_threshold: 1e-6
+metrics: [binary_accuracy, mse, margin]

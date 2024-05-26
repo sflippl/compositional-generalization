@@ -1,0 +1,49 @@
+defaults:
+  - config1
+  - override hydra/launcher: submitit_slurm
+  - override model/network: resnet
+  - override embedding.input_generator: image
+  - _self_
+
+hydra:
+  sweeper:
+    params:
+      embedding.input_generator.seed: range(0,10,1)
+      embedding.input_generator.distance: choice(0)
+      task.training_comps: choice([[2,6],[2,6]])
+  launcher:
+    cpus_per_task: 1
+    mem_gb: 15
+    gres: gpu:1
+    timeout_min: 1200
+    exclude: ax[17]
+embedding:
+  input_generator:
+    dataset: cifar10
+    n_training_samples_total: 40000
+    n_training_imgs: 4000
+    separate_channels: true
+    permutation: random
+    permutation_seed: ${embedding.input_generator.seed}
+    augmentation: [flip, crop]
+task:
+  task_values: [[-4,-3,-2,-1,0,1,2,3,4], [-4,-3,-2,-1,0,1,2,3,4]]
+model:
+  trainer_config:
+    accelerator: gpu
+    max_epochs: 100
+    lr: 1e-3
+    auto_lr_find: false
+    analyse_every_n_epoch: 1
+    momentum: 0.9
+    batch_training: true
+    batch_testing: true
+    num_workers: 2
+    test_batch_size: 256
+    check_val_every_n_epoch: 20
+    optimizer: adam
+  network:
+    seed: ${embedding.input_generator.seed}
+    conv_channels: [16, 32, 64, 128]
+analysis: [additivity]
+metrics: [mse]

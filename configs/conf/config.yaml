@@ -1,0 +1,4 @@
+defaults:
+  - input_generator: schema
+  - output_generator: schema
+  - _self_

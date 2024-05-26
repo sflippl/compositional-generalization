@@ -1,0 +1,363 @@
+---
+title: "Fig. 5"
+output: html_document
+date: "2024-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+library(magrittr)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+linewidth <- 0.25
+```
+
+```{r}
+values_cifar <-
+  bind_rows(
+    read_csv('../collated/C18_addition_resnet/labels.csv') %>%
+    filter(epoch == 100) %>%
+    mutate(
+      task = task.training_comps,
+      network = 'ResNet on CIFAR'
+    ),
+    read_csv('../collated/C16_vit_cifar_improved/labels.csv') %>%
+    filter((epoch == 179)|((epoch==99)&(task.training_comps=='[[4], [4]]'))) %>%
+    mutate(
+      task = task.training_comps,
+      network = 'ViT on CIFAR'
+    ),
+  ) %>%
+  mutate(
+    task = case_when(
+      task.training_comps == '[[0, 8], [0, 8]]' ~ 'Interpolation',
+      task.training_comps == '[[4], [4]]' ~ 'Extrapolation',
+      task.training_comps == '[[0], [0]]' ~ 'Asymmetric\nextrapolation'
+    ) %>%
+      factor(
+        levels = c('Extrapolation', 'Asymmetric\nextrapolation', 'Interpolation')
+      )
+  )
+values_cifar <-
+  values_cifar %>%
+  filter(if_else(comp_0=='all', comp_1!='all', comp_1=='all'), epoch!=0) %>%
+  inner_join(
+    values_cifar %>%
+      filter(comp_0=='all', comp_1=='all') %>%
+      select(-comp_0, -comp_1) %>%
+      rename(intercept=value)
+  ) %>%
+  mutate(value = value + intercept/2) %>%
+  mutate(
+    item = if_else(comp_0=='all', comp_1, comp_0) %>%
+      as.integer(),
+    component = if_else(comp_0=='all', '2', '1')
+  )
+```
+
+```{r}
+values_mnist <-
+  read_csv('../collated/19_addition_mnist/labels.csv') %>%
+  filter(epoch != 0) %>%
+  mutate(
+    task = if_else(
+      task.instances_seed != 'None',
+      paste0('dispersed (', task.instances_seed, ')'),
+      task.training_comps
+    ),
+    task_type = if_else(
+      task.instances_seed != 'None', 'dispersed', 'comps'
+    )
+  )
+values_mnist <-
+  values_mnist %>%
+  filter(if_else(comp_0=='all', comp_1!='all', comp_1=='all'), epoch!=0) %>%
+  inner_join(
+    values_mnist %>%
+      filter(comp_0=='all', comp_1=='all') %>%
+      select(-comp_0, -comp_1) %>%
+      rename(intercept=value)
+  ) %>%
+  mutate(value = value + intercept/2) %>%
+  mutate(
+    item = if_else(comp_0=='all', comp_1, comp_0) %>%
+      as.integer(),
+    component = if_else(comp_0=='all', '2', '1')
+  )
+fig_a <-
+  bind_rows(
+    values_mnist %>% filter(embedding.input_generator.distance == 0) %>%
+      filter(task == '[[4], [4]]') %>%
+      mutate(network = 'ConvNet on MNIST'),
+    values_cifar %>% filter(task == 'Extrapolation')
+  ) %>%
+  ggplot(aes(item-4, value, color=network, group=network, linetype=network)) +
+  geom_abline(slope=1, color='black', linetype='11', size=0.25) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend=FALSE, fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=0.25) +
+  my_theme +
+  coord_fixed() +
+  labs(x = 'Item', y = 'Value', linetype = NULL, color = NULL) +
+  scale_x_continuous(breaks = c(-4, 0, 4), labels = c('[-4]', '[0]', '[4]')) +
+  scale_y_continuous(breaks = c(-4, 0, 4), limits = c(-4, 4)) +
+  scale_color_brewer(palette = 'Dark2') +
+  scale_linetype_manual(values = c('solid', '21', '21'))
+fig_a
+```
+
+```{r}
+similarity_mnist <-
+  read_csv('../collated/19_addition_mnist/similarity_features.csv', guess_max = 1e5) %>%
+  filter(layer == 11) %>%
+  #filter(layer %in% c(0, 16, 18, 7, 9, 12, 14)) %>%
+  separate(col = spec0, into=c(NA, 'spec0_1', 'spec0_2')) %>%
+  separate(col = spec1, into=c(NA, 'spec1_1', 'spec1_2')) %>%
+  mutate(
+    training = if_else(epoch==0, 'before', 'after'),
+    trial_type = case_when(
+      (spec0_1==spec1_1)&(spec0_2==spec1_2)~'identical',
+      (spec0_1==spec1_1)|(spec0_2==spec1_2)~'overlapping',
+      TRUE~'distinct'
+    )
+  ) %>%
+  group_by(spec0_1, spec1_1, spec0_2, spec1_2, trial_type, embedding.input_generator.distance, embedding.input_generator.seed, layer, training) %>%
+  summarise(array = mean(array))
+similarity_mnist <-
+  similarity_mnist %>%
+  inner_join(
+    similarity_mnist %>%
+      filter(trial_type%in% c('identical', 'distinct')) %>%
+      group_by(embedding.input_generator.distance, embedding.input_generator.seed, layer, training, trial_type) %>%
+      summarise(array = mean(array)) %>%
+      pivot_wider(names_from = 'trial_type', values_from = 'array')
+  )
+se <- function(x) sd(x)/sqrt(length(x))
+fig_b <-
+  similarity_mnist %>%
+  filter(layer %in% c(11, 15, 17, 9, 1), trial_type=='overlapping', training=='before', layer==11) %>%
+  #group_by(spec0_1, spec0_2, spec1_1, spec1_2, layer, training, trial_type, embedding.input_generator.distance) %>%
+  #summarise(array = mean(array), distinct = mean(distinct), identical = mean(identical)) %>%
+  ggplot(aes(embedding.input_generator.distance, (array-distinct)/(identical-distinct))) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend=FALSE, fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  #stat_summary() +
+  labs(x = 'Dist.', y = 'Sal(1,2)') +
+  stat_summary(geom='line', size=.25) +
+  my_theme +
+  scale_y_continuous(n.breaks = 2) +
+  scale_x_continuous(breaks = c(0, 20))
+fig_b
+```
+
+```{r}
+fig_c <-
+  values_mnist %>%
+  filter(task == '[[4], [4]]') %>%
+  mutate(
+    distance = as.double(embedding.input_generator.distance)
+  ) %>%
+  ggplot(aes(item-4, value, color=distance, group=embedding.input_generator.distance)) +
+  geom_abline(slope=1, color='black', linetype='11', size=0.25) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x), show.legend=FALSE) +
+  stat_summary(geom='line', size=.25) +
+  my_theme +
+  coord_fixed() +
+  labs(x = 'Item', y = 'Value', color = 'Dist.') +
+  scale_color_viridis_c(breaks = c(0, 20)) +
+  scale_x_continuous(breaks = c(-4, 0, 4), labels = c('[-4]', '[0]', '[4]')) +
+  scale_y_continuous(breaks = c(-4, 0, 4), limits = c(-4, 4)) +
+  theme(legend.position = c(0.2, 0.8))
+fig_c
+```
+
+```{r}
+metrics_mnist <- read_csv('../collated/22_cdm_mnist/metrics.csv') %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ '3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ '2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ '1'
+    )
+  ) %>%
+  select(-train_loss, -step, -task.leftout_conjunctions) %>%
+  filter(!is.na(val_loss)) %>%
+  pivot_longer(cols=starts_with('task')) %>%
+  separate(col=name, into=c(NA, 'task_split', NA, NA, 'embedding_split', 'metric'), sep="[(--),=,/]")
+last_epoch_mnist <-
+  metrics_mnist %>%
+  group_by(leftout_conjunctions, task_split, embedding_split, metric, model.trainer_config.criterion, embedding.input_generator.seed, embedding.input_generator.distance) %>%
+  summarise(epoch = max(epoch)) %>%
+  filter(epoch>0)
+fig_d <-
+  metrics_mnist %>%
+  inner_join(last_epoch_mnist) %>%
+  filter(metric == 'binary_accuracy', model.trainer_config.criterion=='crossentropy', embedding_split == 'val_2', task_split=='test') %>%
+  ggplot(aes(embedding.input_generator.distance, value, color=leftout_conjunctions, group=leftout_conjunctions)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, show.legend=FALSE, fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=.25) +
+  my_theme +
+  scale_y_continuous(limits = c(0,1), breaks = c(0, 0.5, 1)) +
+  scale_x_continuous(breaks = c(0, 20)) +
+  scale_color_manual(values = c(`3` = '#11C638', `2` = '#83D38A', `1` = '#C4DEC6'), labels = c('CDM-3', 'CDM-2', 'CDM-1')) +
+  labs(x = 'Dist.', y = 'Accuracy', color = 'Task')
+fig_d
+```
+
+```{r}
+values <- read_csv('../collated/22_cdm_mnist/labels.csv') %>%
+  filter(embedding.input_generator.distance == 20) %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ '3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ '2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ '1'
+    )
+  ) %>%
+  mutate(
+    conjunction_type = case_when(
+      (comp_0 == 'all') & (comp_1 == 'all') & (comp_2 == 'all') ~ 'intercept',
+      (comp_1 == 'all') & (comp_2 == 'all') ~ 'context only',
+      ((comp_0 == '0') & (comp_1 == 'all')) | ((comp_0 == '1') & (comp_2 == 'all')) ~ 'wrong conj',
+      ((comp_0 == '1') & (comp_1 == 'all')) | ((comp_0 == '0') & (comp_2 == 'all')) ~ 'right conj',
+      (comp_0 == 'all') & ((comp_1=='all') | (comp_2=='all')) ~ 'sensory feature',
+      (comp_0 == 'all') ~ 'sensory feature',
+      TRUE ~ 'memorization'
+    )
+  )
+values <-
+  values %>%
+  filter(model.trainer_config.criterion == 'crossentropy') %>%
+  group_by(comp_0, comp_1, comp_2, leftout_conjunctions, conjunction_type) %>%
+  summarise(value = mean(value)) %>%
+  mutate(
+    conjunction_type = conjunction_type %>%
+      factor(levels = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization')) %>%
+      fct_rev()
+  ) %>%
+  filter(conjunction_type != 'intercept') %>%
+  group_by(conjunction_type, leftout_conjunctions) %>%
+  summarise(value = mean(abs(value)))
+values <-
+  values %>%
+  inner_join(
+    values %>%
+      group_by(leftout_conjunctions) %>%
+      summarise(total = sum(value))
+  ) %>%
+  mutate(value = value/total)
+df <- bind_rows(
+  read_csv('../collated/C15_cdm_cifar_resnet_improved/labels.csv', guess_max = 1e5) %>%
+    filter(epoch==99) %>%
+    mutate(network = 'ResNet on\nCIFAR'),
+  read_csv('../collated/C19_cdm_cifar_vit/labels.csv') %>%
+      mutate(network = 'ViT on\nCIFAR') %>%
+    filter(epoch == 200)
+) %>%
+  mutate(
+    leftout_conjunctions = case_when(
+      task.leftout_conjunctions == "[{1: [0, 1, 2], 2: [3, 4, 5]}]" ~ '3',
+      task.leftout_conjunctions == "[{1: [0, 1], 2: [3, 4]}]" ~ '2',
+      task.leftout_conjunctions == "[{1: [0], 2: [3]}]" ~ '1'
+    )
+  ) %>%
+  mutate(
+    conjunction_type = case_when(
+      (comp_0 == 'all') & (comp_1 == 'all') & (comp_2 == 'all') ~ 'intercept',
+      (comp_1 == 'all') & (comp_2 == 'all') ~ 'context only',
+      ((comp_0 == '0') & (comp_1 == 'all')) | ((comp_0 == '1') & (comp_2 == 'all')) ~ 'wrong conj',
+      ((comp_0 == '1') & (comp_1 == 'all')) | ((comp_0 == '0') & (comp_2 == 'all')) ~ 'right conj',
+      (comp_0 == 'all') & ((comp_1=='all') | (comp_2=='all')) ~ 'sensory feature',
+      (comp_0 == 'all') ~ 'sensory feature',
+      TRUE ~ 'memorization'
+    )
+  ) %>%
+  group_by(comp_0, comp_1, comp_2, leftout_conjunctions, conjunction_type, network) %>%
+  summarise(value = mean((value))) %>%
+  group_by(leftout_conjunctions, conjunction_type, network) %>%
+  summarise(value = mean(abs(value)))
+df <-
+  df %>%
+  inner_join(
+    df %>%
+      group_by(leftout_conjunctions, network) %>%
+      summarise(total = sum(value))
+  ) %>%
+  mutate(value = value/total)
+fig_e <-
+  bind_rows(
+    values %>% mutate(network = 'ConvNet on\nMNIST'),
+    df %>% filter(conjunction_type != 'intercept')
+  ) %>%
+  ggplot(aes(conjunction_type, abs(value), fill=leftout_conjunctions)) +
+  stat_summary(geom='bar', position='dodge') +
+  coord_flip() +
+  scale_x_discrete(breaks = c('right conj', 'wrong conj', 'sensory feature', 'context only', 'memorization'),
+                   labels = c('Right conj.', 'Wrong conj.', 'Sensory feat.', 'Context only', 'Memorization')) +
+  #scale_fill_manual(values = c('darkgreen', 'orange')) +
+  scale_fill_manual(values = c(`3` = '#11C638', `2` = '#83D38A', `1` = '#C4DEC6'), breaks = c(3, 2, 1), labels = c('CDM-3', 'CDM-2', 'CDM-1')) + 
+  labs(x = 'Conj. type', y = 'Rel. magnitude', fill='Task variant') +
+  scale_y_continuous(breaks = c(0, 0.5)) +
+  facet_wrap(~network, nrow=1) +
+  my_theme
+fig_e
+```
+
+```{r}
+metrics_mnist <-
+  read_csv('../collated/24_te_mnist/metrics.csv') %>%
+  filter(!is.na(val_loss)) %>%
+  mutate(
+    train_items = if_else(task.train_items == '[1, 1]', '1', '4')
+  ) %>%
+  select(-step, -train_loss, -task.train_items) %>%
+  pivot_longer(cols=starts_with('task')) %>%
+  separate(col=name, into=c(NA, 'task_split', NA, NA, 'embedding_split', 'metric'), sep="[(--),=,/]")
+se <- function(x) sd(x)/sqrt(length(x))
+fig_f <-
+  metrics_mnist %>%
+  filter(epoch == 150, model.trainer_config.criterion=='crossentropy', metric=='binary_accuracy', embedding_split %in% c('val_2', 'train')) %>%
+  mutate(
+    generalization = case_when(
+      embedding_split == 'train' ~ 'Training set',
+      task_split == 'train' ~ 'In-distribution',
+      task_split == 'test' ~ 'Compositional'
+    ) %>% factor(levels = c('Training set', 'In-distribution', 'Compositional'))
+  ) %>%
+  ggplot(aes(embedding.input_generator.distance, value, color=generalization, group=generalization)) +
+  stat_summary(geom='ribbon', color=NA, fill='grey20', alpha=0.2, fun.min=function(x)mean(x)-2*se(x), fun.max=function(x)mean(x)+2*se(x)) +
+  stat_summary(geom='line', size=.25) +
+  my_theme +
+  labs(y = 'Acc.', x = 'Dist.', color='Split', linetype=NULL) +
+  scale_color_manual(
+    values = c('black', 'blue', 'orange')
+  ) +
+  guides(linetype=guide_none()) +
+  scale_x_continuous(breaks = c(0, 20)) +
+  scale_y_continuous(breaks = c(0.5, 1), limits = c(NA, 1))
+fig_f
+```
+
+
+```{r}
+fig <- (fig_a + fig_b + fig_c + fig_e + fig_f) + plot_layout(nrow=1, widths=c(1,1,1,3,1))
+fig <- fig + plot_annotation(tag_levels = 'a')
+fig & theme(legend.position = 'top')
+ggsave('../figures/neurips/neurips-5.pdf', width = width, height = 0.35*width, units = 'cm')
+```
+

@@ -1,0 +1,122 @@
+---
+title: "Untitled"
+output: html_document
+date: "2024-05-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(patchwork)
+library(latex2exp)
+my_theme <-
+  ggplot2::theme_classic() +
+      ggplot2::theme(
+        title = ggplot2::element_text(size = 8),
+        text = ggplot2::element_text(size = 7),
+        axis.text = ggplot2::element_text(size = 7),
+        legend.text = ggplot2::element_text(size = 7),
+        plot.tag = ggplot2::element_text(face = 'bold', size = 8),
+        strip.text = ggplot2::element_text(size = 7),
+        strip.background = element_blank(),
+        legend.key.size = unit(6, 'pt'),
+        panel.background = element_blank(),
+        plot.margin = unit(c(0,0,0,0), 'pt'),
+        plot.background=element_blank()
+      )
+width <- 13.968
+```
+
+## Addition schema
+
+```{r}
+schemas <-
+  expand.grid(
+    item1 = -4:4, item2 = -4:4, task = c('Extrapolation', 'Interpolation', 'Both')
+  ) %>%
+  as_tibble() %>%
+  mutate(
+    split = case_when(
+      task=='Extrapolation' ~ (item1==0)|(item2==0),
+      task == 'Interpolation' ~ (item1 %in% c(-4, 4))|(item2 %in% c(-4, 4)),
+      task == 'Both' ~ (item1 %in% c(-2, 2))|(item2 %in% c(-2, 2))
+    ),
+    split = if_else(split, 'Train', 'Test')
+  )
+fig_a <-
+  schemas %>%
+  ggplot(aes(item1, item2, fill = split)) +
+  geom_tile() +
+  scale_x_continuous(breaks = c(-4, 4), labels = c('[-4]', '[4]')) +
+  scale_y_continuous(breaks = c(-4, 4), labels = c('[-4]', '[4]')) +
+  labs(x = 'Item 1', y = 'Item 2', fill = NULL) +
+  scale_fill_manual(breaks = c('Train', 'Test'), values=c('grey20', 'grey80')) +
+  facet_wrap(~task) +
+  my_theme +
+  coord_fixed() +
+  guides(fill=guide_none())
+fig_a
+```
+
+```{r}
+fig_b <-
+  expand.grid(
+    item1 = 1:6, item2 = 1:6, context=1:2
+  ) %>%
+  as_tibble() %>%
+  mutate(
+    y = if_else(
+      if_else(context == 1, item1<=3, item2<=3),
+      '1', '-1'
+    ),
+    context = paste('Context', context),
+    split = if_else((item1>=4)&(item2<=3), 'Test', 'Train')
+  ) %>%
+  ggplot(aes(item1, item2, fill = y, alpha = split)) +
+  geom_tile() +
+  coord_equal() +
+  scale_x_continuous(breaks=1:6, labels=c()) +
+  scale_y_continuous(breaks=1:6, labels = c()) +
+  scale_fill_manual(values=c(`1`=scales::muted('blue'), `-1`=scales::muted('red')), labels = c('Cat. 1', 'Cat. 2')) +
+  scale_alpha_manual(values = c(Train = 1., Test = 0.5), labels = c('Train', 'Test')) +
+  geom_path(aes(linetype='CDM-3', x=x, y=y), data=tibble(x=c(3.5, 3.5, 6.5), y=c(0.5, 3.5, 3.5)), inherit.aes=FALSE, size = 0.25) +
+  geom_path(aes(linetype='CDM-2', x=x, y=y), data=tibble(x=c(4.5, 4.5, 6.5), y=c(0.5, 2.5, 2.5)), inherit.aes=FALSE, size = 0.25) +
+  geom_path(aes(linetype='CDM-1', x=x, y=y), data=tibble(x=c(5.5, 5.5, 6.5), y=c(0.5, 1.5, 1.5)), inherit.aes=FALSE, size = 0.25) +
+  my_theme +
+  labs(x = 'Feat. 1', y = 'Feat. 2', fill=NULL, linetype='Training set') +
+  scale_linetype_manual(values = c(`CDM-3`='solid', `CDM-2`='32', `CDM-1`='11')) +
+  facet_wrap(~context, ncol=2)
+fig_b
+```
+
+```{r}
+fig_c <-
+  expand.grid(i=1:6, j=1:6) %>%
+  as_tibble() %>%
+  mutate(
+    i2 = map_chr(i, ~LETTERS[.]),
+    j2 = map_chr(j, ~LETTERS[.]),
+    input = paste0(i2, j2),
+    output = if_else((i<=3)==(j<=3), '1', '-1'),
+    split = if_else(input %in% c('AC', 'CA', 'CD', 'DC', 'AF', 'FA', 'DF', 'FD'), 'test', 'train')
+  ) %>%
+  ggplot(aes(j2, i2, fill=output, alpha=split, label=input)) +
+  geom_tile() +
+  scale_alpha_manual(values = c(train = 1., test = 0.5), labels = c('Train', 'Test')) +
+  scale_fill_manual(values=c(`1`=scales::muted('blue'), `-1`=scales::muted('red')), labels = c('Eq.', 'Not eq.')) +
+  my_theme +
+  labs(x='Item 2', y='Item 1', fill=NULL, alpha=NULL) +
+  coord_equal() +
+  coord_fixed()
+fig_c
+```
+
+```{r}
+fig <-
+  (wrap_elements(grid::textGrob('setup')) + my_theme) + fig_a + fig_b + fig_c +
+  plot_layout(nrow=1, widths=c(3,3,2,1)) +
+  plot_annotation(tag_levels='a')
+fig & theme(legend.position='top')
+ggsave('../figures/neurips/neurips-1.pdf', width = width, height = 0.35*width, units = 'cm')
+```
+
