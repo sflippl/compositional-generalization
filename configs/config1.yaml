@@ -1,0 +1,9 @@
+defaults:
+  - embedding.input_generator: schema
+  - embedding.output_generator: schema
+  - task: addition
+  - model: lightning
+  - _self_
+
+metrics: []
+analysis: [additivity]
